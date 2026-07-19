@@ -9,6 +9,8 @@ function AuthFormInner({ mode }: { mode: "login" | "register" }) {
   const router = useRouter();
   const params = useSearchParams();
   const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
+  const [account, setAccount] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -17,12 +19,16 @@ function AuthFormInner({ mode }: { mode: "login" | "register" }) {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (busy) return;
+    if (mode === "register" && !username.trim() && !email.trim()) {
+      setError("用户名与邮箱至少填写一项");
+      return;
+    }
     setBusy(true);
     setError("");
     const res = await fetch(`/api/auth/${mode}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email, password, name }),
+      body: JSON.stringify(mode === "register" ? { username, email, password, name } : { account, password }),
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
@@ -107,31 +113,56 @@ function AuthFormInner({ mode }: { mode: "login" | "register" }) {
         </Link>
         <form className="card p-6 flex flex-col gap-4" onSubmit={submit}>
           <h1 className="font-semibold text-lg">{isRegister ? "创建账号" : "欢迎回来"}</h1>
-          {isRegister && (
+          {isRegister ? (
+            <>
+              <label className="flex flex-col gap-1.5 text-sm">
+                用户名
+                <input
+                  className="input px-3 py-2"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="2-20 位字母/数字/中文/下划线"
+                  maxLength={20}
+                  autoComplete="username"
+                />
+              </label>
+              <label className="flex flex-col gap-1.5 text-sm">
+                邮箱
+                <input
+                  className="input px-3 py-2"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  autoComplete="email"
+                />
+                <span className="text-xs text-muted">用户名与邮箱至少填一项,均可用于登录</span>
+              </label>
+              <label className="flex flex-col gap-1.5 text-sm">
+                昵称
+                <input
+                  className="input px-3 py-2"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="怎么称呼你(可选,默认同用户名)"
+                  maxLength={40}
+                  autoComplete="nickname"
+                />
+              </label>
+            </>
+          ) : (
             <label className="flex flex-col gap-1.5 text-sm">
-              昵称
+              账号
               <input
                 className="input px-3 py-2"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="怎么称呼你(可选)"
-                maxLength={40}
-                autoComplete="nickname"
+                required
+                value={account}
+                onChange={(e) => setAccount(e.target.value)}
+                placeholder="用户名或邮箱"
+                autoComplete="username"
               />
             </label>
           )}
-          <label className="flex flex-col gap-1.5 text-sm">
-            邮箱
-            <input
-              className="input px-3 py-2"
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              autoComplete="email"
-            />
-          </label>
           <label className="flex flex-col gap-1.5 text-sm">
             密码
             <input

@@ -8,15 +8,20 @@ export async function POST(req: Request) {
   if (!rl.ok) {
     return NextResponse.json({ error: `尝试过于频繁,请 ${rl.retryAfterSec} 秒后再试` }, { status: 429 });
   }
-  const { email, password } = await req.json().catch(() => ({}));
-  if (typeof email !== "string" || typeof password !== "string") {
-    return NextResponse.json({ error: "请输入邮箱和密码" }, { status: 400 });
+  const { account, email, password } = await req.json().catch(() => ({}));
+  // Older clients send {email}; the unified field accepts a username or an email.
+  const ident =
+    typeof account === "string" && account.trim() ? account.trim() : typeof email === "string" ? email.trim() : "";
+  if (!ident || typeof password !== "string") {
+    return NextResponse.json({ error: "请输入账号和密码" }, { status: 400 });
   }
-  const row = db.prepare("SELECT id, password_hash FROM users WHERE email = ?").get(email.toLowerCase()) as
-    | { id: string; password_hash: string }
-    | undefined;
+  const row = (
+    ident.includes("@")
+      ? db.prepare("SELECT id, password_hash FROM users WHERE email = ?").get(ident.toLowerCase())
+      : db.prepare("SELECT id, password_hash FROM users WHERE lower(username) = lower(?)").get(ident)
+  ) as { id: string; password_hash: string } | undefined;
   if (!row || !verifyPassword(password, row.password_hash)) {
-    return NextResponse.json({ error: "邮箱或密码错误" }, { status: 401 });
+    return NextResponse.json({ error: "账号或密码错误" }, { status: 401 });
   }
   await createSession(row.id);
   return NextResponse.json({ ok: true });

@@ -18,7 +18,8 @@ function createDb(): DatabaseSync {
 
     CREATE TABLE IF NOT EXISTS users (
       id            TEXT PRIMARY KEY,
-      email         TEXT NOT NULL UNIQUE,
+      email         TEXT UNIQUE,
+      username      TEXT,
       name          TEXT NOT NULL,
       password_hash TEXT NOT NULL,
       created_at    INTEGER NOT NULL
@@ -166,6 +167,11 @@ function createDb(): DatabaseSync {
   ensureColumn(db, "projects", "goal_status", "goal_status TEXT");
   ensureColumn(db, "projects", "acceptance", "acceptance TEXT");
   ensureColumn(db, "projects", "fused_from", "fused_from TEXT");
+  ensureColumn(db, "users", "username", "username TEXT");
+  relaxUsersEmail(db);
+  db.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(lower(username)) WHERE username IS NOT NULL"
+  );
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_domain ON projects(domain_name) WHERE domain_name IS NOT NULL");
   db.exec("CREATE INDEX IF NOT EXISTS idx_credit_events_user ON credit_events(user_id, created_at)");
   db.exec(`
@@ -200,6 +206,38 @@ function backfillArtifacts(db: DatabaseSync) {
   for (const r of rows) {
     insert.run(`a_${randomBytes(9).toString("base64url")}`, r.project_id, r.version_id, r.prompt, Date.now());
   }
+}
+
+/**
+ * One-time rebuild for legacy databases where users.email was NOT NULL:
+ * username-only registration needs a nullable email. Runs after every users
+ * ensureColumn so the copied column list below is the complete, final schema —
+ * keep it in sync if users gains new columns (and add them above this call).
+ */
+function relaxUsersEmail(db: DatabaseSync) {
+  const cols = db.prepare("PRAGMA table_info(users)").all() as { name: string; notnull: number }[];
+  if (cols.find((c) => c.name === "email")?.notnull !== 1) return;
+  db.exec("PRAGMA foreign_keys = OFF");
+  db.exec(`
+    BEGIN;
+    CREATE TABLE users_relaxed (
+      id            TEXT PRIMARY KEY,
+      email         TEXT UNIQUE,
+      username      TEXT,
+      name          TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      created_at    INTEGER NOT NULL,
+      is_demo       INTEGER NOT NULL DEFAULT 0,
+      credits       INTEGER NOT NULL DEFAULT 0,
+      plan          TEXT NOT NULL DEFAULT 'free'
+    );
+    INSERT INTO users_relaxed (id, email, username, name, password_hash, created_at, is_demo, credits, plan)
+      SELECT id, email, username, name, password_hash, created_at, is_demo, credits, plan FROM users;
+    DROP TABLE users;
+    ALTER TABLE users_relaxed RENAME TO users;
+    COMMIT;
+  `);
+  db.exec("PRAGMA foreign_keys = ON");
 }
 
 /** Additive migration: CREATE TABLE IF NOT EXISTS won't extend existing tables. */

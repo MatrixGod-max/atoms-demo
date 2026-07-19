@@ -3,7 +3,17 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-export default function SettingsForm({ name, email, isDemo }: { name: string; email: string; isDemo: boolean }) {
+export default function SettingsForm({
+  name,
+  email,
+  username,
+  isDemo,
+}: {
+  name: string;
+  email: string | null;
+  username: string | null;
+  isDemo: boolean;
+}) {
   const router = useRouter();
   const [newName, setNewName] = useState(name);
   const [nameMsg, setNameMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -56,8 +66,10 @@ export default function SettingsForm({ name, email, isDemo }: { name: string; em
 
       <section className="card p-5">
         <h2 className="font-semibold text-sm mb-4">基本信息</h2>
+        <label className="block text-xs text-muted mb-1">用户名</label>
+        <input className="input w-full px-3 py-2 text-sm mb-3 opacity-60" value={username ?? "未设置"} disabled />
         <label className="block text-xs text-muted mb-1">邮箱</label>
-        <input className="input w-full px-3 py-2 text-sm mb-3 opacity-60" value={email} disabled />
+        <input className="input w-full px-3 py-2 text-sm mb-3 opacity-60" value={email ?? "未绑定"} disabled />
         <label className="block text-xs text-muted mb-1">名称</label>
         <input
           className="input w-full px-3 py-2 text-sm"

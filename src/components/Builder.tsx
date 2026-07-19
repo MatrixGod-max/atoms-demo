@@ -474,7 +474,10 @@ export default function Builder({ projectId }: { projectId: string }) {
   }, [projectId]);
 
   useEffect(() => {
-    if (detail?.project.published_version_id) loadReports();
+    if (!detail?.project.published_version_id) return;
+    // Defer past the commit so the lint-enforced "no sync setState in effect" invariant holds.
+    const t = setTimeout(loadReports, 0);
+    return () => clearTimeout(t);
   }, [detail?.project.published_version_id, loadReports]);
 
   async function markReports(ids: string[], status: "handled" | "dismissed") {

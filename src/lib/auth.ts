@@ -8,7 +8,8 @@ const SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
 
 export interface User {
   id: string;
-  email: string;
+  email: string | null;
+  username: string | null;
   name: string;
   plan: Plan;
   isDemo: boolean;
@@ -59,16 +60,18 @@ export async function getUser(): Promise<User | null> {
   if (!token) return null;
   const row = db
     .prepare(
-      `SELECT u.id, u.email, u.name, u.plan, u.is_demo, s.expires_at FROM sessions s
+      `SELECT u.id, u.email, u.username, u.name, u.plan, u.is_demo, s.expires_at FROM sessions s
        JOIN users u ON u.id = s.user_id WHERE s.token = ?`
     )
-    .get(token) as { id: string; email: string; name: string; plan: Plan; is_demo: number; expires_at: number } | undefined;
+    .get(token) as
+    | { id: string; email: string | null; username: string | null; name: string; plan: Plan; is_demo: number; expires_at: number }
+    | undefined;
   if (!row) return null;
   if (row.expires_at < now()) {
     db.prepare("DELETE FROM sessions WHERE token = ?").run(token);
     return null;
   }
-  return { id: row.id, email: row.email, name: row.name, plan: row.plan, isDemo: !!row.is_demo };
+  return { id: row.id, email: row.email, username: row.username, name: row.name, plan: row.plan, isDemo: !!row.is_demo };
 }
 
 export async function destroySession(): Promise<void> {

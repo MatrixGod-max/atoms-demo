@@ -7,7 +7,8 @@ import { useEffect, useRef, useState } from "react";
 export interface MenuUser {
   id: string;
   name: string;
-  email: string;
+  email: string | null;
+  username: string | null;
   plan: string;
   isDemo: boolean;
 }
@@ -34,8 +35,12 @@ export default function UserMenu({ user }: { user: MenuUser }) {
   const [redeemMsg, setRedeemMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
-    const stored = localStorage.getItem(THEME_KEY);
-    if (stored === "light" || stored === "dark" || stored === "system") setThemeMode(stored);
+    // Defer past the commit so the lint-enforced "no sync setState in effect" invariant holds.
+    const t = setTimeout(() => {
+      const stored = localStorage.getItem(THEME_KEY);
+      if (stored === "light" || stored === "dark" || stored === "system") setThemeMode(stored);
+    }, 0);
+    return () => clearTimeout(t);
   }, []);
 
   useEffect(() => {
@@ -123,7 +128,7 @@ export default function UserMenu({ user }: { user: MenuUser }) {
         <div className="absolute bottom-full left-0 right-0 mb-2 card p-1.5 z-30 flex flex-col">
           <div className="px-3 py-2 border-b border-line mb-1">
             <span className="block text-xs font-medium truncate">{user.name}</span>
-            <span className="block text-xs text-muted truncate">{user.email}</span>
+            <span className="block text-xs text-muted truncate">{user.email ?? (user.username ? `@${user.username}` : "")}</span>
           </div>
           <Link href="/settings" className={itemCls} onClick={() => setOpen(false)}>
             <span className="w-4 text-center">⚙</span>用户设置

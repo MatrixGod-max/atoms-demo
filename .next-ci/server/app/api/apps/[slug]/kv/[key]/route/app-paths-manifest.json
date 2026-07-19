@@ -1,0 +1,3 @@
+{
+  "/api/apps/[slug]/kv/[key]/route": "app/api/apps/[slug]/kv/[key]/route.js"
+}

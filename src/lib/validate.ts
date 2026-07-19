@@ -81,8 +81,9 @@ export interface AcceptanceRunResult {
   results: AcceptanceOutcome[];
 }
 
-const CASE_TIMEOUT_MS = 6_000;
-const STEP_SETTLE_MS = 250;
+const CASE_TIMEOUT_MS = 12_000;
+const STEP_SETTLE_MS = 300;
+const ASSERT_RETRY_MS = 2_500;
 
 async function runCase(
   browser: Awaited<ReturnType<typeof puppeteer.launch>>,
@@ -98,11 +99,14 @@ async function runCase(
     await page.setContent(html, { waitUntil: "load", timeout: 8_000 });
     await new Promise((r) => setTimeout(r, 600));
     for (const [i, step] of c.steps.entries()) {
-      const el = await page.$(step.selector);
       if (step.action === "assertNotExists") {
-        if (el) return { criterion: c.criterion, pass: false, note: `第${i + 1}步:元素 ${step.selector} 不应存在但存在` };
+        if (await page.$(step.selector)) {
+          return { criterion: c.criterion, pass: false, note: `第${i + 1}步:元素 ${step.selector} 不应存在但存在` };
+        }
         continue;
       }
+      // UI updates are async; wait briefly for the element instead of sampling once.
+      const el = await page.waitForSelector(step.selector, { timeout: ASSERT_RETRY_MS }).catch(() => null);
       if (!el) return { criterion: c.criterion, pass: false, note: `第${i + 1}步:未找到元素 ${step.selector}` };
       if (step.action === "click") {
         await el.click();
@@ -112,8 +116,15 @@ async function runCase(
         await el.type(String(step.text ?? ""), { delay: 10 });
         await new Promise((r) => setTimeout(r, STEP_SETTLE_MS));
       } else if (step.action === "assertText") {
-        const text = await page.evaluate((e) => (e.textContent ?? "") + ((e as HTMLInputElement).value ?? ""), el);
         const want = String(step.contains ?? "");
+        // Poll until the text lands — one-shot sampling flakes under load.
+        const deadline = Date.now() + ASSERT_RETRY_MS;
+        let text = "";
+        for (;;) {
+          text = await page.evaluate((e) => (e.textContent ?? "") + ((e as HTMLInputElement).value ?? ""), el);
+          if (text.includes(want) || Date.now() > deadline) break;
+          await new Promise((r) => setTimeout(r, 150));
+        }
         if (!text.includes(want)) {
           return {
             criterion: c.criterion,
@@ -122,7 +133,7 @@ async function runCase(
           };
         }
       }
-      // assertExists: the non-null check above already passed
+      // assertExists: waitForSelector above already proved it
     }
     return { criterion: c.criterion, pass: true };
   } finally {

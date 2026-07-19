@@ -1,0 +1,3 @@
+{
+  "/api/apps/[slug]/manifest.webmanifest/route": "app/api/apps/[slug]/manifest.webmanifest/route.js"
+}

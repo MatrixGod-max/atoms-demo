@@ -1,0 +1,3 @@
+{
+  "/api/apps/[slug]/icon.svg/route": "app/api/apps/[slug]/icon.svg/route.js"
+}
