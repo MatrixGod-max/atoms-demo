@@ -263,7 +263,6 @@ export default function Builder({ projectId }: { projectId: string }) {
 
   const project = detail?.project;
   const versions = detail?.versions ?? [];
-  const currentNum = versions.find((v) => v.id === project?.current_version_id)?.num;
   const appsOrigin = process.env.NEXT_PUBLIC_APPS_ORIGIN;
   const publishedUrl =
     project?.published_version_id && project.slug
