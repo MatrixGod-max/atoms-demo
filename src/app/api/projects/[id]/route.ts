@@ -5,6 +5,7 @@ import { ownedProject } from "@/lib/projects";
 import { jobRunner } from "@/lib/jobs";
 import { now } from "@/lib/db";
 import { listAttachments } from "@/lib/attachments";
+import { listDeployments, DEPLOY_TARGETS } from "@/lib/deploy";
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const user = await getUser();
@@ -32,6 +33,8 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     versions,
     currentHtml: current?.html ?? null,
     attachments: listAttachments(id),
+    deployments: listDeployments(id),
+    deployTargets: DEPLOY_TARGETS,
     activeJob: active ? { id: active.id, status: active.status, stage: active.stage } : null,
   });
 }

@@ -65,8 +65,8 @@ export default async function ArtifactPage({ params }: { params: Promise<{ slug:
         <Link href="/" className="flex items-center gap-2 font-semibold tracking-wide">
           <span className="text-accent text-xl">⚛</span> Quark
         </Link>
-        <Link href="/explore" className="text-sm text-muted hover:text-ink">
-          展厅
+        <Link href="/resources" className="text-sm text-muted hover:text-ink">
+          资源中心
         </Link>
       </nav>
 

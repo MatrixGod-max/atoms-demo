@@ -23,7 +23,8 @@ export function proxy(req: NextRequest) {
   }
 
   // CSRF guard: browser-issued mutations must come from our own origin.
-  if (MUTATING.has(req.method) && pathname.startsWith("/api/")) {
+  // /api/apps/* (public app KV) is deliberately cross-origin: deployed copies on S3 etc. call it via CORS.
+  if (MUTATING.has(req.method) && pathname.startsWith("/api/") && !pathname.startsWith("/api/apps/")) {
     const origin = req.headers.get("origin");
     if (origin) {
       let originHost = "";

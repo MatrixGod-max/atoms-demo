@@ -1,0 +1,25 @@
+# Quick self-deploy of the Quark service itself (default: this/any machine).
+# Cloud-agnostic: point a reverse proxy at :8090 and set the env below.
+#   docker compose up -d
+services:
+  quark:
+    build: .
+    ports:
+      - "8090:3000"
+    environment:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?set in .env}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      PLATFORM_ORIGIN: ${PLATFORM_ORIGIN:-}
+      NEXT_PUBLIC_APPS_ORIGIN: ${NEXT_PUBLIC_APPS_ORIGIN:-}
+      APPS_HOST: ${APPS_HOST:-}
+      APPS_REDIRECT: ${APPS_REDIRECT:-0}
+      # S3 deploy/resource features need an AWS credential chain:
+      AWS_REGION: ${AWS_REGION:-us-west-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+    volumes:
+      - quark-data:/data
+    restart: unless-stopped
+
+volumes:
+  quark-data:

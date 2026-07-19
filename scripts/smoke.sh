@@ -104,6 +104,18 @@ if curl -fsS "$BASE_URL/p/$MSLUG/v/1" | grep -q "serviceWorker"; then fail "snap
 step "web project has no PWA injection (regression)"
 if curl -fsS "$BASE_URL/p/$SLUG" | grep -q 'rel="manifest"'; then fail "web app must not have manifest"; fi
 
+step "resources: templates listed, template quick-start, CORS preflight"
+TCOUNT=$(curl -fsS "$BASE_URL/api/templates" | grep -o '"id":"tpl_' | wc -l)
+[ "$TCOUNT" -ge 6 ] || fail "expected >=6 templates, got $TCOUNT"
+curl -fsS -o /dev/null "$BASE_URL/resources" || fail "resources page"
+curl -fsS "$BASE_URL/api/templates/tpl_habit/preview" | grep -q "<!DOCTYPE html>" || fail "template preview"
+TPROJ=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects" \
+  -H 'content-type: application/json' -d '{"templateId":"tpl_ledger"}' | sed -E 's/.*"id":"([^"]+)".*/\1/')
+[ -n "$TPROJ" ] || fail "template quick-start"
+curl -fsS -b "$JAR" "$BASE_URL/api/projects/$TPROJ" | grep -q '"platform":"mobile"' || fail "template platform inherit"
+CORS=$(curl -fsS -X OPTIONS -o /dev/null -w '%{http_code}' "$BASE_URL/api/apps/$SLUG/kv/x" -H 'Origin: http://elsewhere.example' -H 'Access-Control-Request-Method: PUT')
+[ "$CORS" = "204" ] || fail "kv CORS preflight, got $CORS"
+
 step "unauthenticated dashboard access is redirected"
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/dashboard")
 [ "$CODE" = "307" ] || [ "$CODE" = "302" ] || fail "dashboard should redirect, got $CODE"

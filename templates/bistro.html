@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>巷口食堂 · 家常菜</title>
+<style>
+:root{--bg:#f7f2e9;--ink:#3a2e24;--mut:#8a7a68;--acc:#c0392b;--card:#fffdf8;--line:#e6dccb}
+*{margin:0;box-sizing:border-box}body{font-family:"PingFang SC",-apple-system,sans-serif;background:var(--bg);color:var(--ink);line-height:1.65}
+.wrap{max-width:720px;margin:0 auto;padding:0 20px}
+header{text-align:center;padding:48px 0 24px}
+h1{font-size:34px;letter-spacing:6px}
+.tagline{color:var(--mut);margin-top:8px;font-size:14px}
+.badge{display:inline-block;background:var(--acc);color:#fff;font-size:12px;padding:3px 12px;border-radius:99px;margin-top:12px}
+.tabs{display:flex;gap:8px;justify-content:center;padding:20px 0 14px;flex-wrap:wrap}
+.tabs button{border:1px solid var(--line);background:var(--card);padding:8px 18px;border-radius:99px;cursor:pointer;font-size:14px;color:var(--mut)}
+.tabs button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.menu{display:flex;flex-direction:column;gap:10px;padding-bottom:24px}
+.dish{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 18px;display:flex;justify-content:space-between;align-items:center}
+.dish b{font-size:16px}.dish small{display:block;color:var(--mut);margin-top:2px}
+.dish .p{color:var(--acc);font-weight:700;white-space:nowrap;margin-left:16px}
+.info{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding-bottom:24px}
+.info .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;font-size:14px}
+.info b{display:block;margin-bottom:4px}
+.book{background:var(--ink);color:#fff;border-radius:16px;padding:28px;margin-bottom:40px}
+.book h2{font-size:20px;margin-bottom:12px}
+.book form{display:flex;gap:8px;flex-wrap:wrap}
+.book input,.book select{padding:10px 12px;border-radius:9px;border:none;font-size:14px;flex:1;min-width:120px}
+.book button{background:var(--acc);color:#fff;border:none;padding:10px 22px;border-radius:9px;cursor:pointer;font-size:14px}
+.book .ok{color:#ffd9a0;font-size:13px;margin-top:10px;width:100%}
+footer{text-align:center;color:var(--mut);font-size:12px;padding-bottom:28px}
+@media(max-width:520px){.info{grid-template-columns:1fr}}
+</style></head><body>
+<div class="wrap">
+  <header><h1>巷口食堂</h1><p class="tagline">开了十一年的家常菜 · 每天只做四十份</p><span class="badge">今日照常营业 11:00 – 21:00</span></header>
+  <div class="tabs" id="tabs"><button data-c="hot" class="on">热菜</button><button data-c="cold">凉菜</button><button data-c="soup">汤 · 主食</button><button data-c="drink">饮品</button></div>
+  <div class="menu" id="menu"></div>
+  <div class="info">
+    <div class="card"><b>📍 找到我们</b>老城区丰盛巷 12 号,巷口第二家(蓝色门帘)。</div>
+    <div class="card"><b>📞 电话</b>0571-8888-6666<br>高峰期建议提前预订。</div>
+  </div>
+  <section class="book"><h2>到店预订</h2>
+    <form id="bf">
+      <input id="bn" required placeholder="称呼">
+      <select id="bp"><option>2 位</option><option>4 位</option><option>6 位</option><option>8 位以上</option></select>
+      <input id="bt" type="time" required value="18:30">
+      <button type="submit">登记</button>
+    </form>
+    <div class="ok" id="bok"></div>
+  </section>
+  <footer>巷口食堂 · 用 Quark 模板搭建</footer>
+</div>
+<script>
+var dishes={
+ hot:[['红烧肉','肥而不腻,配卤蛋一颗','¥38'],['小炒黄牛肉','现切黄牛肉,小米辣爆炒','¥42'],['糖醋排骨','老式做法,起锅淋香醋','¥36'],['家常豆腐','外焦里嫩,下饭首选','¥18']],
+ cold:[['凉拌木耳','爽脆酸辣','¥12'],['白切鸡','走地鸡,姜葱蘸水','¥28'],['拍黄瓜','蒜香现拍','¥10']],
+ soup:[['番茄蛋汤','熬到起沙','¥14'],['腊味煲仔饭','锅巴金黄','¥26'],['手擀面','可选清汤/拌','¥16']],
+ drink:[['酸梅汤','每日现熬','¥8'],['桂花米酿','微甜低度','¥12']]
+};
+function render(c){document.getElementById('menu').innerHTML=dishes[c].map(function(d){
+  return '<div class="dish"><span><b>'+d[0]+'</b><small>'+d[1]+'</small></span><span class="p">'+d[2]+'</span></div>'}).join('')}
+document.getElementById('tabs').addEventListener('click',function(e){if(e.target.tagName!=='BUTTON')return;
+  document.querySelectorAll('.tabs button').forEach(function(b){b.classList.remove('on')});e.target.classList.add('on');render(e.target.dataset.c)});
+document.getElementById('bf').addEventListener('submit',async function(e){e.preventDefault();
+  var rec={n:document.getElementById('bn').value,p:document.getElementById('bp').value,t:document.getElementById('bt').value,at:Date.now()};
+  var list=[];try{if(window.quark&&window.quark.storage){list=JSON.parse(await window.quark.storage.get('bookings')||'[]')}else{list=JSON.parse(localStorage.getItem('bs_bk')||'[]')}}catch(_){}
+  list.push(rec);
+  try{if(window.quark&&window.quark.storage){await window.quark.storage.set('bookings',JSON.stringify(list))}else{localStorage.setItem('bs_bk',JSON.stringify(list))}}catch(_){}
+  document.getElementById('bok').textContent='已登记,'+rec.t+' 见!(当前第 '+list.length+' 单)';this.reset();document.getElementById('bt').value='18:30';
+});
+render('hot');
+</script></body></html>

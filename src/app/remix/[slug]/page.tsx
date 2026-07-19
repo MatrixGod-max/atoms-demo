@@ -38,8 +38,8 @@ export default function RemixPage() {
       {error ? (
         <>
           <p className="text-bad text-sm">{error}</p>
-          <Link href="/explore" className="btn-ghost px-4 py-2 text-sm">
-            返回展厅
+          <Link href="/resources" className="btn-ghost px-4 py-2 text-sm">
+            返回资源中心
           </Link>
         </>
       ) : (

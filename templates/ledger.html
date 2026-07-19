@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#fdfbf7"><meta name="apple-mobile-web-app-capable" content="yes">
+<title>一笔</title>
+<style>
+:root{--bg:#fdfbf7;--ink:#33302b;--mut:#9a938a;--acc:#e07b39;--card:#fff;--line:#eee7dc}
+*{margin:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{font-family:-apple-system,"PingFang SC",sans-serif;background:var(--bg);color:var(--ink);min-height:100vh;padding:calc(env(safe-area-inset-top) + 20px) 18px calc(env(safe-area-inset-bottom) + 20px)}
+.month{color:var(--mut);font-size:13px}
+.total{font-size:40px;font-weight:800;font-variant-numeric:tabular-nums;margin:2px 0 4px}
+.byc{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 18px}
+.byc span{font-size:12px;background:var(--card);border:1px solid var(--line);border-radius:99px;padding:4px 10px;color:var(--mut)}
+.add{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:18px}
+.cats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
+.cats button{border:1px solid var(--line);background:var(--bg);border-radius:12px;padding:10px 4px;font-size:13px;cursor:pointer;min-height:48px}
+.cats button.on{border-color:var(--acc);background:#fdeee1;color:var(--acc)}
+.row{display:flex;gap:8px}
+.row input{flex:1;padding:14px;border:1px solid var(--line);border-radius:12px;font-size:16px}
+.row button{min-width:88px;background:var(--acc);color:#fff;border:none;border-radius:12px;font-size:15px;cursor:pointer}
+h2{font-size:13px;color:var(--mut);margin:0 0 8px;font-weight:600}
+.list{display:flex;flex-direction:column;gap:8px}
+.it{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;align-items:center;gap:10px}
+.it .e{font-size:20px}.it small{color:var(--mut);display:block;font-size:11px}
+.it .a{margin-left:auto;font-weight:700;font-variant-numeric:tabular-nums}
+.it .del{border:none;background:none;color:var(--mut);font-size:16px;padding:6px;cursor:pointer}
+.empty{text-align:center;color:var(--mut);font-size:13px;padding:32px 0}
+</style></head><body>
+<div class="month" id="mon"></div>
+<div class="total" id="total">¥0</div>
+<div class="byc" id="byc"></div>
+<div class="add">
+  <div class="cats" id="cats"></div>
+  <div class="row"><input id="amt" type="number" inputmode="decimal" min="0.01" step="0.01" placeholder="金额"><button id="go">记一笔</button></div>
+</div>
+<h2>本月明细</h2>
+<div class="list" id="list"></div>
+<div class="empty" id="empty" hidden>本月还没有记录,先记一笔今天的支出吧。</div>
+<script>
+(async function(){
+var CATS=[['🍜','餐饮'],['🚇','出行'],['🛒','日用'],['🎮','娱乐'],['🏠','居住'],['💊','健康'],['🎁','人情'],['📦','其他']];
+var mon=new Date().toISOString().slice(0,7);var cat=0;var items=null;
+document.getElementById('mon').textContent=mon.replace('-','年 ')+'月 · 总支出';
+async function load(){try{if(window.quark&&window.quark.storage){items=JSON.parse(await window.quark.storage.get('ledger')||'null')}else{items=JSON.parse(localStorage.getItem('lg')||'null')}}catch(_){items=null}}
+async function save(){try{if(window.quark&&window.quark.storage){await window.quark.storage.set('ledger',JSON.stringify(items))}else{localStorage.setItem('lg',JSON.stringify(items))}}catch(_){}}
+await load();if(!items)items=[];
+document.getElementById('cats').innerHTML=CATS.map(function(c,i){return '<button data-i="'+i+'"'+(i===0?' class="on"':'')+'>'+c[0]+' '+c[1]+'</button>'}).join('');
+document.getElementById('cats').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;cat=+b.dataset.i;
+  document.querySelectorAll('.cats button').forEach(function(x){x.classList.remove('on')});b.classList.add('on')});
+function monItems(){return items.filter(function(it){return it.d.slice(0,7)===mon})}
+function render(){
+  var mi=monItems();var total=mi.reduce(function(s,it){return s+it.a},0);
+  document.getElementById('total').textContent='¥'+total.toFixed(2);
+  var byc={};mi.forEach(function(it){byc[it.c]=(byc[it.c]||0)+it.a});
+  document.getElementById('byc').innerHTML=Object.keys(byc).sort(function(a,b){return byc[b]-byc[a]}).map(function(c){
+    return '<span>'+CATS[c][0]+' '+CATS[c][1]+' ¥'+byc[c].toFixed(0)+'</span>'}).join('');
+  document.getElementById('empty').hidden=mi.length>0;
+  document.getElementById('list').innerHTML=mi.slice().reverse().map(function(it){
+    return '<div class="it"><span class="e">'+CATS[it.c][0]+'</span><span>'+CATS[it.c][1]+'<small>'+it.d.slice(5)+'</small></span><span class="a">¥'+it.a.toFixed(2)+'</span><button class="del" data-id="'+it.id+'">✕</button></div>'}).join('');
+}
+document.getElementById('go').addEventListener('click',async function(){
+  var a=parseFloat(document.getElementById('amt').value);if(!a||a<=0)return;
+  items.push({id:Date.now(),a:a,c:cat,d:new Date().toISOString().slice(0,10)});
+  await save();document.getElementById('amt').value='';render();
+});
+document.getElementById('list').addEventListener('click',async function(e){
+  var b=e.target.closest('.del');if(!b)return;items=items.filter(function(it){return String(it.id)!==b.dataset.id});
+  await save();render();
+});
+await save();render();
+})();
+</script></body></html>

@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Lumen — 把周报写成一句话</title>
+<style>
+:root{--ink:#101322;--mut:#5f6478;--bg:#fbfaf7;--card:#fff;--acc:#2f5cff;--line:#e8e6df}
+*{margin:0;box-sizing:border-box}body{font-family:-apple-system,"PingFang SC",sans-serif;background:var(--bg);color:var(--ink);line-height:1.6}
+.wrap{max-width:960px;margin:0 auto;padding:0 24px}
+nav{display:flex;justify-content:space-between;align-items:center;padding:20px 0}
+.logo{font-weight:800;font-size:20px}.logo em{color:var(--acc);font-style:normal}
+.btn{display:inline-block;background:var(--acc);color:#fff;padding:12px 22px;border-radius:10px;text-decoration:none;border:none;font-size:15px;cursor:pointer}
+.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.hero{text-align:center;padding:72px 0 56px}
+.hero h1{font-size:44px;line-height:1.2;letter-spacing:-1px}
+.hero p{color:var(--mut);max-width:520px;margin:18px auto 28px}
+.feat{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;padding:40px 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px}
+.card h3{font-size:16px;margin-bottom:6px}.card p{color:var(--mut);font-size:14px}
+.price{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;padding:16px 0 40px}
+.price .card.hot{border-color:var(--acc);box-shadow:0 8px 24px rgba(47,92,255,.12)}
+.price .num{font-size:34px;font-weight:800;margin:8px 0}
+.price ul{list-style:none;color:var(--mut);font-size:14px;margin:10px 0 16px}.price li{padding:3px 0}
+h2{font-size:26px;text-align:center;padding-top:32px}
+.faq{max-width:640px;margin:0 auto;padding:16px 0 48px}
+.faq .q{border-bottom:1px solid var(--line);padding:14px 0;cursor:pointer}
+.faq .q b{display:flex;justify-content:space-between}.faq .a{display:none;color:var(--mut);font-size:14px;padding-top:8px}
+.faq .q.open .a{display:block}
+.sub{background:var(--ink);color:#fff;border-radius:18px;padding:40px;text-align:center;margin:24px 0 56px}
+.sub input{padding:12px 14px;border-radius:10px;border:none;width:min(280px,60vw);font-size:15px}
+.sub .btn{margin-left:8px}
+.ok{color:#7ef0b2;margin-top:10px;font-size:14px}
+footer{color:var(--mut);text-align:center;font-size:13px;padding-bottom:32px}
+@media(max-width:600px){.hero h1{font-size:32px}}
+</style></head><body>
+<div class="wrap">
+  <nav><span class="logo">◗ <em>Lumen</em></span><a class="btn ghost" href="#pricing">定价</a></nav>
+  <section class="hero">
+    <h1>把一周的工作,<br>写成一句话周报</h1>
+    <p>Lumen 自动汇总你的提交、会议与待办,生成老板真正会读完的周报。每周五下午,准时躺在收件箱。</p>
+    <a class="btn" href="#sub">免费开始 →</a>
+  </section>
+  <section class="feat">
+    <div class="card"><h3>⏱ 3 分钟接入</h3><p>连接日历与代码仓库,不改变任何现有习惯。</p></div>
+    <div class="card"><h3>✍️ 像人写的</h3><p>不是流水账,而是有重点、有数字、有下一步的周报。</p></div>
+    <div class="card"><h3>🔒 数据不出你手</h3><p>只读权限,随时一键断开,导出全部数据。</p></div>
+  </section>
+  <h2 id="pricing">定价</h2>
+  <section class="price">
+    <div class="card"><h3>个人</h3><div class="num">¥0</div><ul><li>每周 1 份周报</li><li>2 个数据源</li></ul><a class="btn ghost" href="#sub">开始使用</a></div>
+    <div class="card hot"><h3>专业</h3><div class="num">¥29<small>/月</small></div><ul><li>无限周报与日报</li><li>全部数据源</li><li>自定义模板</li></ul><a class="btn" href="#sub">免费试用 14 天</a></div>
+    <div class="card"><h3>团队</h3><div class="num">¥99<small>/月</small></div><ul><li>团队聚合视图</li><li>SSO 与权限</li></ul><a class="btn ghost" href="#sub">联系我们</a></div>
+  </section>
+  <h2>常见问题</h2>
+  <section class="faq" id="faq">
+    <div class="q"><b>会读取我的代码内容吗?<span>+</span></b><div class="a">不会。只读取提交信息与统计数据,永不拉取源码正文。</div></div>
+    <div class="q"><b>支持哪些工具?<span>+</span></b><div class="a">GitHub/GitLab、Google/Outlook 日历、Linear、Notion,持续增加中。</div></div>
+    <div class="q"><b>可以随时取消吗?<span>+</span></b><div class="a">可以,取消后数据保留 30 天供导出。</div></div>
+  </section>
+  <section class="sub" id="sub">
+    <h2 style="padding:0 0 8px">抢先体验</h2>
+    <form id="f"><input id="em" type="email" required placeholder="you@company.com"><button class="btn" type="submit">加入等待列表</button></form>
+    <div class="ok" id="msg"></div>
+  </section>
+  <footer>© 2026 Lumen · 用 Quark 模板搭建</footer>
+</div>
+<script>
+document.getElementById('faq').addEventListener('click',function(e){var q=e.target.closest('.q');if(q)q.classList.toggle('open')});
+document.getElementById('f').addEventListener('submit',async function(e){
+  e.preventDefault();var em=document.getElementById('em').value.trim();if(!em)return;
+  var list=[];try{if(window.quark&&window.quark.storage){list=JSON.parse(await window.quark.storage.get('waitlist')||'[]')}else{list=JSON.parse(localStorage.getItem('lm_wl')||'[]')}}catch(_){}
+  if(list.indexOf(em)<0)list.push(em);
+  try{if(window.quark&&window.quark.storage){await window.quark.storage.set('waitlist',JSON.stringify(list))}else{localStorage.setItem('lm_wl',JSON.stringify(list))}}catch(_){}
+  document.getElementById('msg').textContent='已登记 '+list.length+' 位,我们会尽快联系你 ✓';document.getElementById('em').value='';
+});
+</script></body></html>

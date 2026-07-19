@@ -32,6 +32,22 @@ flowchart LR
     H -->|Remix| A
 ```
 
+## 资源中心与部署体系
+
+- **资源中心 `/resources`**:「发现」= 社区发布的智能体作品(可打开/Remix);「模板」= 6 个精选网站与应用模板
+  (SaaS 落地页 / 作品集 / 小店展示 / 数据看板 / 习惯打卡 / 极简记账)——「使用模板」即以模板为 v1 建项目,
+  之后照常对话迭代、换主题、发布部署。**模板资源同步上传到专门的 S3 bucket**(`quark-res-*`,每个模板一个
+  专属 key `templates/{id}.html`),DB 记录 bucket+key
+- **统一部署目标**(默认本机,多云接口预留):
+  | 目标 | 状态 | 说明 |
+  |---|---|---|
+  | 本机 · Quark 托管 | ✅ 默认 | 发布即部署:quark-apps 域,HTTPS + 云存储 + 制品体系 |
+  | AWS S3 静态托管 | ✅ 可用 | 每次部署创建**专属 bucket**(`quark-app-{slug}-{rand}`)+ 网站托管,返回 S3 网站端点(HTTP);应用云存储经 **CORS** 回源继续可用;可一键下线删桶;费用按 S3 计几乎为零 |
+  | Netlify | 🧪 实验性 | 用你自己的 Personal Access Token(仅本次请求使用,不存储) |
+  | Vercel / CF Pages | 🗺 规划 | `DeployTarget` 适配器接口已预留 |
+- **Quark 服务本身的快速部署**:仓库带 `Dockerfile` + `docker-compose.yml`,`docker compose up -d` 即起,
+  环境变量全参数化(不绑定特定云)——默认本机 systemd 运行,任意云主机可用同一镜像自托管,详见 DEPLOY.md
+
 ## 附件 · 深度研究 · 主题变换
 
 - **📎 附件上传**(工作台输入区):文本/数据文件(txt/md/csv/json ≤64KB)全文进入智能体上下文 ——

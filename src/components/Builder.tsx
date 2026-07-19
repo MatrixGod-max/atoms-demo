@@ -32,7 +32,24 @@ interface ProjectDetail {
   versions: Version[];
   currentHtml: string | null;
   attachments: AttachmentMeta[];
+  deployments: Deployment[];
+  deployTargets: DeployTarget[];
   activeJob: { id: string; status: string; stage: string | null } | null;
+}
+
+interface Deployment {
+  id: string;
+  provider: string;
+  url: string;
+  status: "live" | "removed";
+  created_at: number;
+}
+
+interface DeployTarget {
+  id: string;
+  name: string;
+  status: "available" | "experimental" | "planned";
+  note: string;
 }
 
 interface AttachmentMeta {
@@ -93,6 +110,9 @@ export default function Builder({ projectId }: { projectId: string }) {
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
   const [research, setResearch] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
+  const [deployOpen, setDeployOpen] = useState(false);
+  const [deployBusy, setDeployBusy] = useState("");
+  const [netlifyToken, setNetlifyToken] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -383,6 +403,27 @@ export default function Builder({ projectId }: { projectId: string }) {
     if (res.ok) setAttachments(data.attachments);
   }
 
+  async function runDeploy(provider: string) {
+    if (deployBusy) return;
+    setDeployBusy(provider);
+    const res = await fetch(`/api/projects/${projectId}/deploy`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider, token: provider === "netlify" ? netlifyToken : undefined }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) await load();
+    else pushError(data.error || "部署失败");
+    setDeployBusy("");
+  }
+
+  async function undeploy(depId: string) {
+    if (!confirm("下线该部署?(S3 会删除对应 bucket)")) return;
+    const res = await fetch(`/api/projects/${projectId}/deploy/${depId}`, { method: "DELETE" });
+    if (res.ok) await load();
+    else pushError((await res.json().catch(() => ({}))).error || "下线失败");
+  }
+
   function switchTheme(theme: string) {
     setThemeOpen(false);
     generate(
@@ -509,6 +550,66 @@ export default function Builder({ projectId }: { projectId: string }) {
             >
               制品页 ↗
             </Link>
+            <div className="relative">
+              <button
+                className="btn-ghost px-3 py-1.5 text-xs"
+                onClick={() => setDeployOpen(!deployOpen)}
+                title="部署到本机或外部云"
+              >
+                ☁️ 部署
+              </button>
+              {deployOpen && (
+                <div className="absolute right-0 top-full mt-1 card p-3 z-20 w-80 max-w-[90vw] flex flex-col gap-2.5 text-xs">
+                  {(detail?.deployTargets ?? []).map((t) => (
+                    <div key={t.id} className="border border-line rounded-lg p-2.5">
+                      <div className="flex items-center gap-2">
+                        <b>{t.name}</b>
+                        {t.id === "local" && <span className="text-good">● 已部署(默认)</span>}
+                        {t.status === "experimental" && <span className="text-amber">实验性</span>}
+                        {t.status === "planned" && <span className="text-muted">规划中</span>}
+                        {t.id !== "local" && t.status !== "planned" && (
+                          <button
+                            className="btn-primary px-3 py-1 ml-auto"
+                            disabled={!!deployBusy || (t.id === "netlify" && !netlifyToken)}
+                            onClick={() => runDeploy(t.id)}
+                          >
+                            {deployBusy === t.id ? "部署中…" : "部署"}
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-muted mt-1">{t.note}</p>
+                      {t.id === "netlify" && (
+                        <input
+                          className="input w-full px-2 py-1.5 mt-1.5"
+                          type="password"
+                          placeholder="Netlify Personal Access Token"
+                          value={netlifyToken}
+                          onChange={(e) => setNetlifyToken(e.target.value)}
+                        />
+                      )}
+                    </div>
+                  ))}
+                  {(detail?.deployments ?? []).filter((d) => d.status === "live").length > 0 && (
+                    <div>
+                      <p className="font-mono text-[10px] tracking-widest text-muted mb-1.5">已部署</p>
+                      {(detail?.deployments ?? [])
+                        .filter((d) => d.status === "live")
+                        .map((d) => (
+                          <div key={d.id} className="flex items-center gap-2 py-1">
+                            <span className="text-muted shrink-0">{d.provider}</span>
+                            <a href={d.url} target="_blank" rel="noopener" className="text-accent truncate hover:underline">
+                              {d.url.replace(/^https?:\/\//, "")}
+                            </a>
+                            <button className="text-muted hover:text-bad ml-auto shrink-0" onClick={() => undeploy(d.id)}>
+                              下线
+                            </button>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
             <label className="flex items-center gap-1.5 text-xs text-muted cursor-pointer max-sm:hidden" title="展示在公开展厅 /explore">
               <input
                 type="checkbox"

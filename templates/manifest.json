@@ -1,0 +1,8 @@
+[
+  { "id": "tpl_saas_landing", "name": "SaaS 落地页", "category": "网站 · 落地页", "platform": "web", "file": "saas-landing.html", "description": "带定价、FAQ 折叠与订阅收集的产品落地页,替换文案即可上线" },
+  { "id": "tpl_portfolio", "name": "个人作品集", "category": "网站 · 作品集", "platform": "web", "file": "portfolio.html", "description": "作品分类筛选 + 深浅自适应的极简个人主页" },
+  { "id": "tpl_bistro", "name": "小店展示页", "category": "网站 · 商家", "platform": "web", "file": "bistro.html", "description": "餐厅/小店菜单分类展示与到店预订登记" },
+  { "id": "tpl_dashboard", "name": "数据看板", "category": "应用 · 看板", "platform": "web", "file": "dashboard.html", "description": "指标卡 + 柱状图 + 可增删的记录表,数据云端持久化" },
+  { "id": "tpl_habit", "name": "习惯打卡", "category": "移动 · 工具", "platform": "mobile", "file": "habit.html", "description": "移动端习惯打卡与连续天数统计,可安装 PWA" },
+  { "id": "tpl_ledger", "name": "极简记账", "category": "移动 · 工具", "platform": "mobile", "file": "ledger.html", "description": "移动端快速记一笔,按分类汇总本月支出" }
+]

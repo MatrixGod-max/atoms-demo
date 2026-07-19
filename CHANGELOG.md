@@ -1,5 +1,14 @@
 # Changelog
 
+## v7 — 资源中心 + 部署体系(2026-07-19)
+
+- 资源中心 `/resources`:发现(社区作品)+ 模板(6 个网站/应用模板一键快速开始);模板资源
+  上传 S3 专属 bucket/key;`/explore` 迁移重定向
+- 统一部署:默认本机(Quark 托管)+ AWS S3 静态托管(专属 bucket,CORS 回源云存储,一键下线)
+  + Netlify(实验性,自带 token)+ Vercel/CF Pages 接口预留
+- Quark 服务自部署:Dockerfile + docker-compose,一条命令自托管
+- 修复 CI 真根因:构建多 worker 并发初始化 SQLite 报 "database is locked"(busy_timeout 前置)
+
 ## v6 — 附件 · 深度研究 · 主题变换(2026-07-19)
 
 - 附件上传:文本/数据文件进入智能体上下文,图片以 asset:// 引用并在落库前内联为 data URI

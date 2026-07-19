@@ -8,6 +8,10 @@ const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
 function createDb(): DatabaseSync {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const db = new DatabaseSync(path.join(DATA_DIR, "quark.db"));
+  // Next.js build collects page data with several workers importing this module
+  // concurrently; without a busy timeout the parallel WAL/DDL init throws
+  // SQLITE_BUSY ("database is locked").
+  db.exec("PRAGMA busy_timeout = 5000");
   db.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA foreign_keys = ON;
@@ -89,6 +93,30 @@ function createDb(): DatabaseSync {
       size       INTEGER NOT NULL,
       data       BLOB NOT NULL,
       created_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS templates (
+      id          TEXT PRIMARY KEY,
+      name        TEXT NOT NULL,
+      category    TEXT NOT NULL,
+      platform    TEXT NOT NULL CHECK (platform IN ('web','mobile')),
+      description TEXT NOT NULL,
+      html        TEXT NOT NULL,
+      s3_bucket   TEXT,
+      s3_key      TEXT,
+      created_at  INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS deployments (
+      id           TEXT PRIMARY KEY,
+      project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      artifact_seq INTEGER NOT NULL,
+      provider     TEXT NOT NULL,
+      bucket       TEXT,
+      url          TEXT NOT NULL,
+      status       TEXT NOT NULL CHECK (status IN ('live','removed')),
+      created_at   INTEGER NOT NULL,
+      removed_at   INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS app_kv (

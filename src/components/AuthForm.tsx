@@ -30,7 +30,19 @@ function AuthFormInner({ mode }: { mode: "login" | "register" }) {
       setBusy(false);
       return;
     }
-    // Continue an interrupted flow: a Remix click or a landing-page idea typed before signing up.
+    // Continue an interrupted flow: template start, Remix click, or a landing-page idea typed before signing up.
+    if (params.get("next") === "template" && params.get("tpl")) {
+      const tplRes = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ templateId: params.get("tpl") }),
+      });
+      const data = await tplRes.json().catch(() => ({}));
+      if (tplRes.ok) {
+        router.push(`/project/${data.id}`);
+        return;
+      }
+    }
     if (params.get("next") === "remix" && params.get("slug")) {
       const remixRes = await fetch("/api/projects", {
         method: "POST",

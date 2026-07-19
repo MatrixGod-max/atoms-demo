@@ -20,8 +20,33 @@ export async function POST(req: Request) {
   if (!user) return NextResponse.json({ error: "未登录" }, { status: 401 });
   const blocked = demoGuard(user);
   if (blocked) return NextResponse.json({ error: blocked }, { status: 403 });
-  const { prompt, remixSlug, platform } = await req.json().catch(() => ({}));
+  const { prompt, remixSlug, templateId, platform } = await req.json().catch(() => ({}));
   const chosenPlatform = platform === "mobile" ? "mobile" : "web";
+
+  // Start from a curated template (v1 = the template HTML).
+  if (typeof templateId === "string" && templateId) {
+    const tpl = db.prepare("SELECT id, name, platform, html FROM templates WHERE id = ?").get(templateId) as
+      | { id: string; name: string; platform: string; html: string }
+      | undefined;
+    if (!tpl) return NextResponse.json({ error: "模板不存在" }, { status: 404 });
+    const id = newId("p");
+    const versionId = newId("v");
+    const t = now();
+    db.prepare(
+      "INSERT INTO projects (id, user_id, name, platform, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(id, user.id, tpl.name.slice(0, 40), tpl.platform, t, t);
+    db.prepare(
+      "INSERT INTO app_versions (id, project_id, num, html, review_notes, prompt, created_at) VALUES (?, ?, 1, ?, ?, ?, ?)"
+    ).run(versionId, id, tpl.html, `模板「${tpl.name}」`, `模板快速开始:${tpl.name}`, t);
+    db.prepare("UPDATE projects SET current_version_id = ? WHERE id = ?").run(versionId, id);
+    db.prepare("INSERT INTO messages (id, project_id, role, content, created_at) VALUES (?, ?, 'agent', ?, ?)").run(
+      newId("m"),
+      id,
+      `已用模板「${tpl.name}」创建项目,v1 即模板本身。直接提需求(比如改文案、换品牌色、加板块),我会在模板基础上修改。`,
+      t
+    );
+    return NextResponse.json({ id, fromTemplate: true });
+  }
 
   // Fork a published app into a new project of your own (v1 = its published HTML).
   if (typeof remixSlug === "string" && remixSlug) {

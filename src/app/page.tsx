@@ -41,8 +41,8 @@ export default async function Home() {
           <span className="text-accent text-xl">⚛</span> Quark
         </Link>
         <div className="flex items-center gap-3 text-sm">
-          <Link href="/explore" className="text-muted hover:text-ink px-2 py-2">
-            展厅
+          <Link href="/resources" className="text-muted hover:text-ink px-2 py-2">
+            资源中心
           </Link>
           {user ? (
             <Link href="/dashboard" className="btn-primary px-4 py-2">
@@ -113,8 +113,8 @@ export default async function Home() {
         {featured.length > 0 && (
           <section className="pb-20">
             <div className="flex items-baseline justify-between mb-4">
-              <h2 className="font-semibold">来自展厅</h2>
-              <Link href="/explore" className="text-xs text-accent hover:underline">
+              <h2 className="font-semibold">来自资源中心</h2>
+              <Link href="/resources" className="text-xs text-accent hover:underline">
                 全部 →
               </Link>
             </div>

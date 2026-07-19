@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>销售看板</title>
+<style>
+:root{--bg:#f4f6fa;--ink:#1c2333;--mut:#7b849b;--acc:#3457d5;--good:#1e9e6a;--card:#fff;--line:#e3e8f2}
+*{margin:0;box-sizing:border-box}body{font-family:-apple-system,"PingFang SC",sans-serif;background:var(--bg);color:var(--ink)}
+.wrap{max-width:920px;margin:0 auto;padding:24px 20px 48px}
+h1{font-size:22px;padding-bottom:16px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+.kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+.kpi small{color:var(--mut);font-size:12px}.kpi b{display:block;font-size:26px;margin-top:4px;font-variant-numeric:tabular-nums}
+h2{font-size:15px;color:var(--mut);padding:24px 0 10px;font-weight:600}
+.chart{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;display:flex;align-items:flex-end;gap:10px;height:180px}
+.bar{flex:1;background:linear-gradient(180deg,#5b7cf0,var(--acc));border-radius:6px 6px 0 0;position:relative;min-height:4px}
+.bar i{position:absolute;top:-20px;left:0;right:0;text-align:center;font-style:normal;font-size:11px;color:var(--mut)}
+.bar b{position:absolute;bottom:-22px;left:0;right:0;text-align:center;font-size:11px;color:var(--mut);font-weight:500}
+.tbl{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line)}
+th{color:var(--mut);font-size:12px;font-weight:600}
+td .del{color:var(--mut);cursor:pointer;border:none;background:none}td .del:hover{color:#c0392b}
+form{display:flex;gap:8px;padding:12px;flex-wrap:wrap;border-top:1px solid var(--line)}
+input,select{padding:9px 11px;border:1px solid var(--line);border-radius:8px;font-size:14px;flex:1;min-width:110px}
+button.add{background:var(--acc);color:#fff;border:none;border-radius:8px;padding:9px 20px;cursor:pointer}
+.empty{padding:28px;text-align:center;color:var(--mut);font-size:14px}
+</style></head><body>
+<div class="wrap">
+  <h1>📈 销售看板</h1>
+  <div class="kpis" id="kpis"></div>
+  <h2>近六个月成交额</h2>
+  <div class="chart" id="chart"></div>
+  <h2>成交记录</h2>
+  <div class="tbl">
+    <table><thead><tr><th>客户</th><th>月份</th><th>金额</th><th>负责人</th><th></th></tr></thead><tbody id="rows"></tbody></table>
+    <div class="empty" id="empty" hidden>还没有记录,用下方表单添加第一笔成交。</div>
+    <form id="f">
+      <input id="fc" required placeholder="客户名">
+      <select id="fm"></select>
+      <input id="fa" type="number" min="1" required placeholder="金额 (元)">
+      <input id="fo" required placeholder="负责人">
+      <button class="add" type="submit">添加</button>
+    </form>
+  </div>
+</div>
+<script>
+(async function(){
+var K='deals';var deals=null;
+async function load(){try{if(window.quark&&window.quark.storage){deals=JSON.parse(await window.quark.storage.get(K)||'null')}else{deals=JSON.parse(localStorage.getItem('db_'+K)||'null')}}catch(_){deals=null}}
+async function save(){try{if(window.quark&&window.quark.storage){await window.quark.storage.set(K,JSON.stringify(deals))}else{localStorage.setItem('db_'+K,JSON.stringify(deals))}}catch(_){}}
+await load();
+if(!deals){deals=[
+ {c:'蓝湖科技',m:'02',a:86000,o:'王倩'},{c:'磐石制造',m:'03',a:129000,o:'李冬'},
+ {c:'远帆物流',m:'04',a:64000,o:'王倩'},{c:'洲际教育',m:'05',a:158000,o:'赵苒'},
+ {c:'山海文旅',m:'06',a:92000,o:'李冬'},{c:'启明医疗',m:'07',a:173000,o:'赵苒'}];}
+var months=['02','03','04','05','06','07'];
+var sel=document.getElementById('fm');sel.innerHTML=months.map(function(m){return '<option>'+m+'</option>'}).join('');sel.value='07';
+function fmt(n){return '¥'+(n/10000).toFixed(1)+'万'}
+function render(){
+  var total=deals.reduce(function(s,d){return s+d.a},0);
+  var avg=deals.length?total/deals.length:0;
+  var owners={};deals.forEach(function(d){owners[d.o]=(owners[d.o]||0)+d.a});
+  var top=Object.keys(owners).sort(function(a,b){return owners[b]-owners[a]})[0]||'—';
+  document.getElementById('kpis').innerHTML=
+   '<div class="kpi"><small>总成交额</small><b>'+fmt(total)+'</b></div>'+
+   '<div class="kpi"><small>成交笔数</small><b>'+deals.length+'</b></div>'+
+   '<div class="kpi"><small>平均单值</small><b>'+fmt(avg)+'</b></div>'+
+   '<div class="kpi"><small>本期 MVP</small><b style="color:var(--good)">'+top+'</b></div>';
+  var byM=months.map(function(m){return deals.filter(function(d){return d.m===m}).reduce(function(s,d){return s+d.a},0)});
+  var max=Math.max.apply(null,byM.concat([1]));
+  document.getElementById('chart').innerHTML=byM.map(function(v,i){
+   return '<div class="bar" style="height:'+Math.round(v/max*100)+'%"><i>'+(v?fmt(v):'')+'</i><b>'+months[i]+'月</b></div>'}).join('');
+  var rows=document.getElementById('rows');
+  rows.innerHTML=deals.map(function(d,i){
+   return '<tr><td>'+d.c+'</td><td>'+d.m+'月</td><td>'+fmt(d.a)+'</td><td>'+d.o+'</td><td><button class="del" data-i="'+i+'">✕</button></td></tr>'}).join('');
+  document.getElementById('empty').hidden=deals.length>0;
+}
+document.getElementById('rows').addEventListener('click',async function(e){
+  var b=e.target.closest('.del');if(!b)return;deals.splice(+b.dataset.i,1);await save();render();
+});
+document.getElementById('f').addEventListener('submit',async function(e){
+  e.preventDefault();
+  deals.push({c:document.getElementById('fc').value,m:sel.value,a:+document.getElementById('fa').value,o:document.getElementById('fo').value});
+  await save();this.reset();sel.value='07';render();
+});
+await save();render();
+})();
+</script></body></html>

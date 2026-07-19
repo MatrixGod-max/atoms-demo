@@ -63,6 +63,19 @@ docker restart edge-caddy edge-nginx
 # DNS: 删除 Route53 A 记录 quark.lexarcai.com
 ```
 
+## 自部署(Quark 服务本身)
+
+默认形态 = 本机 systemd(上文)。容器路径(任意云主机同样适用,接口=环境变量):
+
+```bash
+cp .env.example .env 2>/dev/null || echo 'DEEPSEEK_API_KEY=sk-...' > .env
+docker compose up -d          # :8090,数据在 named volume quark-data
+```
+
+S3 部署/模板资源功能需要 AWS 凭证链(compose 环境变量或挂载 ~/.aws)。
+生产 systemd 单元含 `Environment=HOME=/home/ubuntu` 供 SDK 读取本机凭证。
+模板种子:`node scripts/seed-templates.mjs`(加 `--no-s3` 跳过上传)。
+
 ## 资源约束
 
 本机 2 vCPU / 4 GiB,`quark.service` 设了 `MemoryMax=768M`。构建时先停开发进程;
