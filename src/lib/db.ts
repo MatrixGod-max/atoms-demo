@@ -79,6 +79,18 @@ function createDb(): DatabaseSync {
       UNIQUE(project_id, seq)
     );
 
+    CREATE TABLE IF NOT EXISTS attachments (
+      id         TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      filename   TEXT NOT NULL,
+      mime       TEXT NOT NULL,
+      kind       TEXT NOT NULL CHECK (kind IN ('text','image')),
+      size       INTEGER NOT NULL,
+      data       BLOB NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS app_kv (
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
       k          TEXT NOT NULL,

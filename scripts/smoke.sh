@@ -30,7 +30,8 @@ JOB=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects/$PROJ/generate" \
 [ -n "$JOB" ] || fail "start job"
 
 step "stream job to completion"
-timeout 120 curl -fsS -N -b "$JAR" "$BASE_URL/api/jobs/$JOB/stream" | grep -q '"type":"version"' || fail "no version event"
+GSTREAM=$(timeout 120 curl -fsS -N -b "$JAR" "$BASE_URL/api/jobs/$JOB/stream")
+echo "$GSTREAM" | grep -q '"type":"version"' || fail "no version event"
 
 step "publish"
 SLUG=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects/$PROJ/publish" \
@@ -60,12 +61,35 @@ curl -fsS -X PUT "$BASE_URL/api/apps/$SLUG/kv/count" \
   -H 'content-type: application/json' -d '{"v":"42"}' | grep -q '"ok":true' || fail "kv put"
 curl -fsS "$BASE_URL/api/apps/$SLUG/kv/count" | grep -q '"v":"42"' || fail "kv get"
 
-step "mobile project: PWA artifact"
+step "attachment + deep research + theme"
+APROJ=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects" \
+  -H 'content-type: application/json' -d '{"prompt":"smoke 附件研究"}' | sed -E 's/.*"id":"([^"]+)".*/\1/')
+DATA_B64=$(printf 'name,score\nA,1' | base64 | tr -d '\n')
+curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects/$APROJ/attachments" \
+  -H 'content-type: application/json' \
+  -d "{\"filename\":\"data.csv\",\"mime\":\"text/csv\",\"dataBase64\":\"$DATA_B64\"}" | grep -q '"filename":"data.csv"' || fail "attachment upload"
+AJOB=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects/$APROJ/generate" \
+  -H 'content-type: application/json' -d '{"prompt":"smoke 附件研究","research":true}' | sed -E 's/.*"jobId":"([^"]+)".*/\1/')
+ASTREAM=$(timeout 120 curl -fsS -N -b "$JAR" "$BASE_URL/api/jobs/$AJOB/stream")
+echo "$ASTREAM" | grep -q '"stage":"researcher"' || fail "researcher stage missing"
+echo "$ASTREAM" | grep -q '"type":"research"' || fail "research brief event missing"
+echo "$ASTREAM" | grep -q '"type":"version"' || fail "attachment gen version"
+curl -fsS -b "$JAR" "$BASE_URL/api/projects/$APROJ" | grep -q 'attachments: data.csv' || fail "attachment marker not in generated html"
+TJOB=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects/$APROJ/generate" \
+  -H 'content-type: application/json' -d '{"prompt":"【主题变换】把应用整体视觉主题切换为「多巴胺」:只改视觉不改功能"}' | sed -E 's/.*"jobId":"([^"]+)".*/\1/')
+TSTREAM=$(timeout 120 curl -fsS -N -b "$JAR" "$BASE_URL/api/jobs/$TJOB/stream")
+echo "$TSTREAM" | grep -q '"num":2' || fail "theme switch should create v2"
+
+step "mobile project: PWA artifact (second account — generate quota is 3/10min per user)"
+curl -fsS -c "$JAR" -X POST "$BASE_URL/api/auth/register" \
+  -H 'content-type: application/json' \
+  -d "{\"email\":\"m-$EMAIL\",\"password\":\"smoke123\"}" | grep -q '"ok":true' || fail "register second account"
 MPROJ=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects" \
   -H 'content-type: application/json' -d '{"prompt":"smoke 移动应用","platform":"mobile"}' | sed -E 's/.*"id":"([^"]+)".*/\1/')
 MJOB=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects/$MPROJ/generate" \
   -H 'content-type: application/json' -d '{"prompt":"smoke 移动应用"}' | sed -E 's/.*"jobId":"([^"]+)".*/\1/')
-timeout 120 curl -fsS -N -b "$JAR" "$BASE_URL/api/jobs/$MJOB/stream" | grep -q '"type":"version"' || fail "mobile generate"
+MSTREAM=$(timeout 120 curl -fsS -N -b "$JAR" "$BASE_URL/api/jobs/$MJOB/stream")
+echo "$MSTREAM" | grep -q '"type":"version"' || fail "mobile generate"
 MSLUG=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects/$MPROJ/publish" \
   -H 'content-type: application/json' -d '{"action":"publish"}' | sed -E 's/.*"slug":"([^"]+)".*/\1/')
 MPAGE=$(curl -fsS "$BASE_URL/p/$MSLUG")

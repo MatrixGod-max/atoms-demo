@@ -1,6 +1,7 @@
 import { db, now } from "./db";
 import { newId } from "./auth";
 import { runPipeline, type AgentEvent, type AppSpec } from "./agent";
+import { inlineImageAssets, loadPipelineAttachments } from "./attachments";
 
 const MAX_CONCURRENT = 2;
 const BUFFER_CAP = 9000;
@@ -27,6 +28,7 @@ interface LiveJob {
   projectId: string;
   userId: string;
   prompt: string;
+  research: boolean;
   history: { role: "user" | "agent"; content: string }[];
   buffer: string[];
   droppedDeltas: boolean;
@@ -60,7 +62,7 @@ class JobRunner {
     return this.live.get(jobId);
   }
 
-  start(projectId: string, userId: string, prompt: string): { jobId: string; position: number } {
+  start(projectId: string, userId: string, prompt: string, research = false): { jobId: string; position: number } {
     const existing = this.activeJobForProject(projectId);
     if (existing) {
       const err = new Error("该项目已有生成任务在进行中") as Error & { code: number; jobId: string };
@@ -91,6 +93,7 @@ class JobRunner {
       projectId,
       userId,
       prompt,
+      research,
       history,
       buffer: [],
       droppedDeltas: false,
@@ -169,6 +172,7 @@ class JobRunner {
             | undefined)
         : undefined;
 
+      const attachments = loadPipelineAttachments(job.projectId);
       let spec: AppSpec | null = null;
       for await (const event of runPipeline({
         request: job.prompt,
@@ -176,12 +180,22 @@ class JobRunner {
         currentHtml: currentVersion?.html ?? null,
         specJson: currentVersion?.spec ?? null,
         platform: project.platform === "mobile" ? "mobile" : "web",
+        research: job.research,
+        attachments,
       })) {
         if (event.type === "plan") spec = event.spec;
         if (event.type === "stage" && event.status === "start") {
           this.setStatus(job.id, "running", { stage: event.stage });
         }
+        if (event.type === "research") {
+          db.prepare(
+            "INSERT INTO messages (id, project_id, role, content, meta, created_at) VALUES (?, ?, 'agent', ?, 'research', ?)"
+          ).run(newId("m"), job.projectId, JSON.stringify(event.brief), now());
+          this.emit(job, event);
+          continue;
+        }
         if (event.type === "html") {
+          const finalHtml = inlineImageAssets(event.html, attachments);
           const versionId = newId("v");
           const num =
             ((db.prepare("SELECT MAX(num) AS m FROM app_versions WHERE project_id = ?").get(job.projectId) as {
@@ -190,7 +204,7 @@ class JobRunner {
           const specJson = spec ? JSON.stringify(spec) : (currentVersion?.spec ?? null);
           db.prepare(
             "INSERT INTO app_versions (id, project_id, num, html, spec, review_notes, prompt, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-          ).run(versionId, job.projectId, num, event.html, specJson, event.reviewNotes, job.prompt, now());
+          ).run(versionId, job.projectId, num, finalHtml, specJson, event.reviewNotes, job.prompt, now());
           db.prepare(
             "UPDATE projects SET current_version_id = ?, updated_at = ?, name = COALESCE(?, name) WHERE id = ?"
           ).run(versionId, now(), spec?.name ?? null, job.projectId);

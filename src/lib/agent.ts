@@ -9,10 +9,27 @@ const MODEL = process.env.DEEPSEEK_MODEL || "deepseek-chat";
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
 import { validateHtml } from "./validate";
+import { fetchReferences } from "./research";
+import type { PipelineAttachment } from "./attachments";
+
+export interface ResearchBrief {
+  audience: string;
+  patterns: string[];
+  must_have: string[];
+  nice_to_have: string[];
+  risks: string[];
+  references: string[];
+}
 
 export type AgentEvent =
-  | { type: "stage"; stage: "planner" | "engineer" | "reviewer" | "validator"; status: "start" | "done"; info?: string }
+  | {
+      type: "stage";
+      stage: "researcher" | "planner" | "engineer" | "reviewer" | "validator";
+      status: "start" | "done";
+      info?: string;
+    }
   | { type: "plan"; spec: AppSpec }
+  | { type: "research"; brief: ResearchBrief }
   | { type: "code_delta"; delta: string }
   | { type: "code_reset" }
   | { type: "agent_message"; content: string }
@@ -119,6 +136,25 @@ export interface PipelineInput {
   currentHtml: string | null;
   specJson: string | null;
   platform: "web" | "mobile";
+  research?: boolean;
+  attachments?: PipelineAttachment[];
+}
+
+/** Attachment context shared by Planner and Engineer prompts. */
+function attachmentContext(attachments: PipelineAttachment[] | undefined): string {
+  if (!attachments?.length) return "";
+  const parts: string[] = [];
+  const texts = attachments.filter((a) => a.kind === "text" && a.text);
+  const images = attachments.filter((a) => a.kind === "image");
+  for (const t of texts) {
+    parts.push(`【用户附件「${t.filename}」内容】\n${t.text!.slice(0, 16_000)}`);
+  }
+  if (images.length) {
+    parts.push(
+      `【可用图片资源】${images.map((i) => `asset://${i.filename}`).join(", ")}\n引用图片时必须写 src="asset://文件名"(平台会自动内联为 data URI);禁止引用不存在的资源名或外部图片。`
+    );
+  }
+  return `\n\n${parts.join("\n\n")}`;
 }
 
 /** Deterministic, LLM-free pipeline for tests/CI (AGENT_MOCK=1). */
@@ -126,6 +162,22 @@ async function* runMockPipeline(input: PipelineInput): AsyncGenerator<AgentEvent
   const isIteration = !!input.currentHtml;
   const broken = input.request.includes("MOCK_BROKEN");
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  if (input.research) {
+    yield { type: "stage", stage: "researcher", status: "start" };
+    await sleep(60);
+    yield {
+      type: "research",
+      brief: {
+        audience: "mock 用户",
+        patterns: ["mock 模式"],
+        must_have: ["计数"],
+        nice_to_have: ["持久化"],
+        risks: ["无"],
+        references: [],
+      },
+    };
+    yield { type: "stage", stage: "researcher", status: "done", info: "mock 研究完成" };
+  }
   if (!isIteration) {
     yield { type: "stage", stage: "planner", status: "start" };
     await sleep(50);
@@ -143,8 +195,11 @@ async function* runMockPipeline(input: PipelineInput): AsyncGenerator<AgentEvent
     input.platform === "mobile"
       ? `<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#0d0e1c"><meta name="apple-mobile-web-app-capable" content="yes">`
       : `<meta name="viewport" content="width=device-width, initial-scale=1">`;
+  const attComment = input.attachments?.length
+    ? `<!-- attachments: ${input.attachments.map((a) => a.filename).join(", ")} -->`
+    : "";
   let html = `<!DOCTYPE html>
-<html lang="zh-CN"><head><meta charset="utf-8">${mobileMeta}<title>Mock 计数器</title>
+<html lang="zh-CN"><head><meta charset="utf-8">${mobileMeta}${attComment}<title>Mock 计数器</title>
 <style>body{font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:16px}button{font-size:20px;padding:8px 24px}</style>
 </head><body><h1 id="n">0</h1><button id="b">+1</button>
 ${broken ? "<script>throw new Error('mock runtime failure')<\/script>" : ""}
@@ -194,6 +249,39 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
 
   // ---- Stage 1: Planner (first generation only) ----
   const isMobile = input.platform === "mobile";
+  const attContext = attachmentContext(input.attachments);
+
+  // ---- Stage 0 (optional): Researcher ----
+  let brief: ResearchBrief | null = null;
+  if (input.research) {
+    yield { type: "stage", stage: "researcher", status: "start" };
+    const references = await fetchReferences(input.request);
+    const refBlock = references.length
+      ? `\n\n参考资料(用户提供的链接抓取):\n${references.map((r) => `- ${r.url}\n${r.excerpt.slice(0, 1500)}`).join("\n")}`
+      : "";
+    try {
+      const raw = await chat(
+        [
+          {
+            role: "system",
+            content: `你是 Quark 平台的研究员智能体(Deep Researcher)。对用户的应用想法做深入的领域分析:先自问自答(目标用户是谁/他们现在怎么解决/同类产品的成熟交互模式/什么功能是及格线/什么是差异化/最大的落地风险),再收敛为结构化简报。严格输出 JSON(无其他文字):
+{"audience":"目标用户一句话","patterns":["同类产品值得借鉴的2-4个模式"],"must_have":["必备功能2-4条"],"nice_to_have":["加分功能1-3条"],"risks":["风险或易错点1-3条"],"references":["引用来源,无则空数组"]}
+语言与用户输入一致。`,
+          },
+          { role: "user", content: `${input.request}${refBlock}${attContext}` },
+        ],
+        2048,
+        0.6
+      );
+      brief = JSON.parse(extractJson(raw)) as ResearchBrief;
+      if (references.length) brief.references = references.map((r) => r.url);
+      yield { type: "research", brief };
+      yield { type: "stage", stage: "researcher", status: "done", info: `${brief.must_have.length + brief.nice_to_have.length} 个功能洞察` };
+    } catch {
+      yield { type: "stage", stage: "researcher", status: "done", info: "研究失败,跳过(不影响生成)" };
+    }
+  }
+
   if (!isIteration) {
     yield { type: "stage", stage: "planner", status: "start" };
     const raw = await chat(
@@ -208,7 +296,10 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
               : ""
           }`,
         },
-        { role: "user", content: input.request },
+        {
+          role: "user",
+          content: `${input.request}${brief ? `\n\n研究员简报(请充分吸收):\n${JSON.stringify(brief, null, 2)}` : ""}${attContext}`,
+        },
       ],
       1024,
       0.5
@@ -233,12 +324,12 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
       .join("\n");
     engineerMessages.push({
       role: "user",
-      content: `这是当前应用的完整代码:\n\n${input.currentHtml}\n\n最近的对话:\n${recent}\n\n用户的新需求: ${input.request}\n\n请在保留现有功能与风格的基础上完成修改,输出修改后的完整 HTML 文件。`,
+      content: `这是当前应用的完整代码:\n\n${input.currentHtml}\n\n最近的对话:\n${recent}\n\n用户的新需求: ${input.request}${attContext}\n\n请在保留现有功能与风格的基础上完成修改,输出修改后的完整 HTML 文件。`,
     });
   } else {
     engineerMessages.push({
       role: "user",
-      content: `产品规格:\n${JSON.stringify(spec, null, 2)}\n\n用户原始需求: ${input.request}\n\n请实现这个应用。`,
+      content: `产品规格:\n${JSON.stringify(spec, null, 2)}\n\n用户原始需求: ${input.request}${attContext}\n\n请实现这个应用。`,
     });
   }
 

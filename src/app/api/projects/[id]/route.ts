@@ -4,6 +4,7 @@ import { demoGuard, getUser } from "@/lib/auth";
 import { ownedProject } from "@/lib/projects";
 import { jobRunner } from "@/lib/jobs";
 import { now } from "@/lib/db";
+import { listAttachments } from "@/lib/attachments";
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const user = await getUser();
@@ -30,6 +31,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     messages,
     versions,
     currentHtml: current?.html ?? null,
+    attachments: listAttachments(id),
     activeJob: active ? { id: active.id, status: active.status, stage: active.stage } : null,
   });
 }

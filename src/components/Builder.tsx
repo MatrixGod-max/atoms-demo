@@ -31,8 +31,19 @@ interface ProjectDetail {
   messages: Message[];
   versions: Version[];
   currentHtml: string | null;
+  attachments: AttachmentMeta[];
   activeJob: { id: string; status: string; stage: string | null } | null;
 }
+
+interface AttachmentMeta {
+  id: string;
+  filename: string;
+  mime: string;
+  kind: "text" | "image";
+  size: number;
+}
+
+const THEME_PRESETS = ["深色", "浅色", "多巴胺", "莫兰迪", "像素复古", "极简黑白", "毛玻璃"];
 
 interface Spec {
   name: string;
@@ -41,10 +52,11 @@ interface Spec {
   design: string;
 }
 
-type StageName = "planner" | "engineer" | "reviewer" | "validator";
+type StageName = "researcher" | "planner" | "engineer" | "reviewer" | "validator";
 type StageState = "idle" | "active" | "done";
 
 const STAGE_LABELS: Record<StageName, string> = {
+  researcher: "Researcher · 研究",
   planner: "Planner · 规划",
   engineer: "Engineer · 构建",
   reviewer: "Reviewer · 评审",
@@ -52,6 +64,7 @@ const STAGE_LABELS: Record<StageName, string> = {
 };
 
 const IDLE_STAGES: Record<StageName, { state: StageState; info?: string }> = {
+  researcher: { state: "idle" },
   planner: { state: "idle" },
   engineer: { state: "idle" },
   reviewer: { state: "idle" },
@@ -77,6 +90,10 @@ export default function Builder({ projectId }: { projectId: string }) {
   const [reconnecting, setReconnecting] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
+  const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
+  const [research, setResearch] = useState(false);
+  const [themeOpen, setThemeOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const codeRef = useRef<HTMLPreElement>(null);
@@ -97,6 +114,7 @@ export default function Builder({ projectId }: { projectId: string }) {
     setDetail(data);
     setMessages(data.messages);
     setHtml(data.currentHtml);
+    setAttachments(data.attachments ?? []);
     return data;
   }, [projectId]);
 
@@ -161,6 +179,12 @@ export default function Builder({ projectId }: { projectId: string }) {
               break;
             case "plan":
               setSpec(event.spec);
+              break;
+            case "research":
+              setMessages((m) => [
+                ...m,
+                { id: `tmp_r_${Date.now()}`, role: "agent", content: JSON.stringify(event.brief), meta: "research" },
+              ]);
               break;
             case "code_delta":
               setStreamCode((c) => c + event.delta);
@@ -232,7 +256,7 @@ export default function Builder({ projectId }: { projectId: string }) {
         const res = await fetch(`/api/projects/${projectId}/generate`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ prompt }),
+          body: JSON.stringify({ prompt, research }),
         });
         const data = await res.json().catch(() => ({}));
         if (res.status === 401) {
@@ -251,7 +275,7 @@ export default function Builder({ projectId }: { projectId: string }) {
         setGenerating(false);
       }
     },
-    [projectId, attachJob, resetRunState, pushError]
+    [projectId, research, attachJob, resetRunState, pushError]
   );
 
   // Initial load: reconnect to a live job if one exists, else auto-start a freshly created project.
@@ -335,6 +359,37 @@ export default function Builder({ projectId }: { projectId: string }) {
     }
   }
 
+  async function uploadFile(file: File) {
+    const buf = await file.arrayBuffer();
+    let binary = "";
+    const bytes = new Uint8Array(buf);
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    }
+    const mime = file.type || (file.name.endsWith(".md") ? "text/markdown" : "text/plain");
+    const res = await fetch(`/api/projects/${projectId}/attachments`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ filename: file.name, mime, dataBase64: btoa(binary) }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) setAttachments(data.attachments);
+    else pushError(data.error || "上传失败");
+  }
+
+  async function removeAttachment(attId: string) {
+    const res = await fetch(`/api/projects/${projectId}/attachments/${attId}`, { method: "DELETE" });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) setAttachments(data.attachments);
+  }
+
+  function switchTheme(theme: string) {
+    setThemeOpen(false);
+    generate(
+      `【主题变换】把应用整体视觉主题切换为「${theme}」:只调整配色、字体气质、圆角、阴影、背景等视觉层,布局结构、功能逻辑、文案与数据处理完全保持不变。`
+    );
+  }
+
   const project = detail?.project;
   const versions = detail?.versions ?? [];
   const appsOrigin = process.env.NEXT_PUBLIC_APPS_ORIGIN;
@@ -391,6 +446,31 @@ export default function Builder({ projectId }: { projectId: string }) {
             )}
             {project?.name ?? "加载中…"}
           </h1>
+        )}
+        {versions.length > 0 && (
+          <div className="relative">
+            <button
+              className="btn-ghost px-3 py-1.5 text-xs"
+              onClick={() => setThemeOpen(!themeOpen)}
+              disabled={generating || !project?.current_version_id}
+              title="一键换肤:只改视觉,不改功能,产生可回滚的新版本"
+            >
+              🎨 换主题
+            </button>
+            {themeOpen && (
+              <div className="absolute right-0 top-full mt-1 card p-1.5 z-20 flex flex-col min-w-32">
+                {THEME_PRESETS.map((t) => (
+                  <button
+                    key={t}
+                    className="text-left px-3 py-1.5 text-xs rounded-md hover:bg-accent-soft"
+                    onClick={() => switchTheme(t)}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         )}
         {versions.length > 0 && (
           <select
@@ -464,19 +544,50 @@ export default function Builder({ projectId }: { projectId: string }) {
           }`}
         >
           <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
-            {messages.map((m) => (
-              <div
-                key={m.id}
-                className={
-                  m.role === "user"
-                    ? "self-end max-w-[85%] bg-accent-soft border border-line rounded-xl rounded-br-sm px-3.5 py-2.5 text-sm whitespace-pre-wrap"
-                    : `self-start max-w-[92%] text-sm whitespace-pre-wrap leading-relaxed ${m.meta === "error" ? "text-bad" : "text-ink"}`
+            {messages.map((m) => {
+              if (m.meta === "research") {
+                let brief: {
+                  audience?: string;
+                  patterns?: string[];
+                  must_have?: string[];
+                  nice_to_have?: string[];
+                  risks?: string[];
+                  references?: string[];
+                } | null = null;
+                try {
+                  brief = JSON.parse(m.content);
+                } catch {
+                  brief = null;
                 }
-              >
-                {m.role === "agent" && <span className="text-accent mr-1.5">⚛</span>}
-                {m.content}
-              </div>
-            ))}
+                if (!brief) return null;
+                return (
+                  <div key={m.id} className="p-3 text-xs self-start max-w-[92%] border border-amber/40 bg-amber/5 rounded-lg">
+                    <p className="font-mono text-[10px] tracking-widest text-amber mb-1.5">RESEARCH BRIEF</p>
+                    {brief.audience && <p className="text-ink">👥 {brief.audience}</p>}
+                    {!!brief.patterns?.length && <p className="text-muted mt-1.5">借鉴模式:{brief.patterns.join(" · ")}</p>}
+                    {!!brief.must_have?.length && <p className="text-muted mt-1">必备:{brief.must_have.join(" · ")}</p>}
+                    {!!brief.nice_to_have?.length && <p className="text-muted mt-1">加分:{brief.nice_to_have.join(" · ")}</p>}
+                    {!!brief.risks?.length && <p className="text-muted mt-1">风险:{brief.risks.join(" · ")}</p>}
+                    {!!brief.references?.length && (
+                      <p className="text-muted mt-1 break-all">引用:{brief.references.join(" ")}</p>
+                    )}
+                  </div>
+                );
+              }
+              return (
+                <div
+                  key={m.id}
+                  className={
+                    m.role === "user"
+                      ? "self-end max-w-[85%] bg-accent-soft border border-line rounded-xl rounded-br-sm px-3.5 py-2.5 text-sm whitespace-pre-wrap"
+                      : `self-start max-w-[92%] text-sm whitespace-pre-wrap leading-relaxed ${m.meta === "error" ? "text-bad" : "text-ink"}`
+                  }
+                >
+                  {m.role === "agent" && <span className="text-accent mr-1.5">⚛</span>}
+                  {m.content}
+                </div>
+              );
+            })}
 
             {retryPrompt && (
               <button
@@ -508,7 +619,9 @@ export default function Builder({ projectId }: { projectId: string }) {
                   {reconnecting && <span className="text-amber ml-2">连接中断,正在重连…</span>}
                 </p>
                 <div className="flex flex-col gap-3">
-                  {(Object.keys(STAGE_LABELS) as StageName[]).map((name) => (
+                  {(Object.keys(STAGE_LABELS) as StageName[])
+                    .filter((name) => name !== "researcher" || stages.researcher.state !== "idle" || research)
+                    .map((name) => (
                     <div key={name} className="flex items-center gap-3">
                       <span
                         className={`stage-dot ${stages[name].state === "active" ? "active" : ""} ${stages[name].state === "done" ? "done" : ""}`}
@@ -528,6 +641,46 @@ export default function Builder({ projectId }: { projectId: string }) {
           </div>
 
           <div className="p-3 border-t border-line shrink-0">
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              <button
+                className="btn-ghost px-2.5 py-1 text-xs"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={generating}
+                title="上传附件:文本/数据文件进入智能体上下文,图片作为资源内嵌进应用"
+              >
+                📎 附件
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                accept=".txt,.md,.csv,.json,image/png,image/jpeg,image/webp,image/svg+xml"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) uploadFile(f);
+                  e.target.value = "";
+                }}
+              />
+              <button
+                className={`px-2.5 py-1 text-xs rounded-lg border transition-colors ${research ? "border-amber/60 text-amber bg-amber/10" : "border-line text-muted hover:text-ink"}`}
+                onClick={() => setResearch(!research)}
+                disabled={generating}
+                title="生成前由研究员智能体做领域分析;需求中的公开链接会被抓取纳入研究"
+              >
+                🔬 深度研究{research ? " ✓" : ""}
+              </button>
+              {attachments.map((a) => (
+                <span key={a.id} className="spec-chip px-2 py-1 text-[11px] flex items-center gap-1.5">
+                  {a.kind === "image" ? "🖼" : "📄"} {a.filename}
+                  <span className="text-muted">{Math.ceil(a.size / 1024)}KB</span>
+                  {!generating && (
+                    <button className="text-muted hover:text-bad" onClick={() => removeAttachment(a.id)} aria-label="删除附件">
+                      ×
+                    </button>
+                  )}
+                </span>
+              ))}
+            </div>
             <div className="flex gap-2">
               <textarea
                 className="input flex-1 px-3 py-2 text-sm resize-none"
