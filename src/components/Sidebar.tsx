@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import UserMenu, { type MenuUser } from "./UserMenu";
+import TaskCenter from "./TaskCenter";
 
 const NAV = [
   ["/", "⌂", "首页"],
@@ -63,6 +64,7 @@ export default function Sidebar({
           </Link>
         );
       })}
+      {user && <TaskCenter collapsed={collapsed} />}
     </nav>
   );
 

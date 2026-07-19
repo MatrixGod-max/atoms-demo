@@ -109,3 +109,11 @@ S3 部署/模板资源功能需要 AWS 凭证链(compose 环境变量或挂载 ~
   如 python open('w') / cp),用 rename 语义的编辑器(sed -i 等)会让容器停留在旧 inode,
   需 `docker restart edge-caddy` 重挂;改完 `docker exec edge-caddy caddy reload --config /etc/caddy/Caddyfile`
 - 注意:~/edge-proxy 非 git 仓库,本变更以此文档为准
+
+## Fusion Cloud(v21,ubuntu@10.234.201.214:8070)
+
+- 装机/修复:`bash scripts/setup-cloud-server.sh`(幂等;vite 模板预热 + build-web.sh + fusion-cloud.service)
+- 运维:`ssh ... 'sudo systemctl status|restart fusion-cloud'`;实例目录 `~/fusion-cloud/apps/{slug}`;
+  清理单实例 `ssh ... '~/fusion-cloud/build-web.sh --clean {slug}'`
+- 平台 env:`CLOUD_SERVICE_URL`(默认 http://10.234.201.214:8070);测试/CI 用 `CLOUD_MOCK=1`;
+  计费循环在平台进程内(10 分钟/轮,整小时结算)

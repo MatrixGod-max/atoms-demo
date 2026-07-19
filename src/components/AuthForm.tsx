@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
-import { launchProject } from "@/lib/launch";
+import { launchProject, startGeneration } from "@/lib/launch";
 
 function AuthFormInner({ mode }: { mode: "login" | "register" }) {
   const router = useRouter();
@@ -96,6 +96,8 @@ function AuthFormInner({ mode }: { mode: "login" | "register" }) {
         }
         const result = await launchProject(prompt, platform, { research, team, theme, connectors, mode, goal, engine });
         if ("id" in result) {
+          // Server-side start (multi-task); on failure the Builder shows the idle project to retry from.
+          await startGeneration(result.id, { prompt, research, team, mode, goalLoop: !!goal }).catch(() => null);
           router.push(`/project/${result.id}`);
           return;
         }

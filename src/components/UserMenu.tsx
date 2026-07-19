@@ -130,6 +130,9 @@ export default function UserMenu({ user }: { user: MenuUser }) {
             <span className="block text-xs font-medium truncate">{user.name}</span>
             <span className="block text-xs text-muted truncate">{user.email ?? (user.username ? `@${user.username}` : "")}</span>
           </div>
+          <Link href="/wallet" className={itemCls} onClick={() => setOpen(false)}>
+            <span className="w-4 text-center">💰</span>AI 钱包
+          </Link>
           <Link href="/settings" className={itemCls} onClick={() => setOpen(false)}>
             <span className="w-4 text-center">⚙</span>用户设置
           </Link>

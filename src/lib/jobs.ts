@@ -4,10 +4,12 @@ import { runPipeline, runGoalEval, type AgentEvent, type AppSpec, type GoalEvalR
 import { concatSources, parseStoredFiles, type ProjectFiles } from "./projectFiles";
 import { inlineImageAssets, loadPipelineAttachments } from "./attachments";
 import type { GenerationMode } from "./models";
-import { charge, generationCost, recordEvent } from "./credits";
+import { PLAN_CONCURRENCY, PLAN_LABELS, charge, generationCost, recordEvent, type Plan } from "./credits";
 import { parseConnectors } from "./connectors";
 
-const MAX_CONCURRENT = 2;
+// 2-core box: LLM streams are IO-bound and the CPU-bound Chrome validator is
+// serialized within each job — 3 is safe here, do not raise further.
+const MAX_CONCURRENT = 3;
 const BUFFER_CAP = 9000;
 const RETAIN_DONE_MS = 10 * 60_000;
 const DAILY_QUOTA = Number(process.env.DAILY_GENERATION_QUOTA || 30);
@@ -19,6 +21,16 @@ export type JobStreamEvent =
   | { type: "job_state"; status: "queued" | "running" | "done" | "error"; error?: string }
   | { type: "goal_eval"; result: GoalEvalResult; round: number; maxRounds: number }
   | { type: "goal_next"; jobId: string; round: number; prompt: string };
+
+export interface UserJob {
+  id: string;
+  project_id: string;
+  project_name: string;
+  status: "queued" | "running";
+  stage: string | null;
+  mode: string;
+  created_at: number;
+}
 
 export interface JobRow {
   id: string;
@@ -68,6 +80,24 @@ class JobRunner {
     return db
       .prepare("SELECT * FROM jobs WHERE project_id = ? AND status IN ('queued','running') ORDER BY created_at DESC")
       .get(projectId) as JobRow | undefined;
+  }
+
+  /** All queued/running jobs of a user across projects (task center). */
+  activeJobsForUser(userId: string): UserJob[] {
+    return db
+      .prepare(
+        `SELECT j.id, j.project_id, p.name AS project_name, j.status, j.stage, j.mode, j.created_at
+         FROM jobs j JOIN projects p ON p.id = j.project_id
+         WHERE j.user_id = ? AND j.status IN ('queued','running') ORDER BY j.created_at ASC`
+      )
+      .all(userId)
+      .map((r) => ({ ...r })) as unknown as UserJob[];
+  }
+
+  /** Display position for a queued job (jobs ahead of it); 0 when running or unknown. */
+  queuePosition(jobId: string): number {
+    const idx = this.queue.indexOf(jobId);
+    return idx < 0 ? 0 : idx + this.running;
   }
 
   getJob(jobId: string): JobRow | undefined {
@@ -343,6 +373,9 @@ class JobRunner {
       // Goal mode: evaluate this round and possibly chain the next one.
       // Project engine: judge readable sources, not the minified bundle.
       const next = await this.evaluateGoal(job, producedFiles ? concatSources(producedFiles) : producedHtml);
+      // Terminal status BEFORE the chained start: the finished row leaves the
+      // user's queued+running count before the next round's row is inserted, so
+      // goal chains can never exceed the per-plan concurrency cap. Do not reorder.
       this.setStatus(job.id, "done");
       if (next) {
         try {
@@ -443,6 +476,24 @@ class JobRunner {
     );
     this.emit(job, { type: "agent_message", content: text });
   }
+}
+
+/** Per-plan concurrency gate, checked by the generate route before any charge. */
+export function canStartJob(userId: string, plan: Plan): { ok: true } | { ok: false; error: string; limit: number } {
+  const limit = PLAN_CONCURRENCY[plan] ?? 1;
+  const active = (
+    db.prepare("SELECT COUNT(*) AS c FROM jobs WHERE user_id = ? AND status IN ('queued','running')").get(userId) as {
+      c: number;
+    }
+  ).c;
+  if (active >= limit) {
+    return {
+      ok: false,
+      limit,
+      error: `同时构建数已达 ${limit} 个(${PLAN_LABELS[plan] ?? plan}),升级套餐可并行构建更多应用`,
+    };
+  }
+  return { ok: true };
 }
 
 const g = globalThis as unknown as { __quarkJobs?: JobRunner };

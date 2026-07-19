@@ -75,6 +75,16 @@ interface AttachmentMeta {
   size: number;
 }
 
+interface CloudInstanceInfo {
+  status: "deploying" | "running" | "stopped" | "error";
+  slug: string;
+  artifact_seq: number | null;
+  hourly_rate: number;
+  error: string | null;
+  log_tail: string | null;
+  deployed_at: number | null;
+}
+
 interface NativeBuildInfo {
   id: string;
   platform: "android" | "ios";
@@ -169,6 +179,9 @@ export default function Builder({ projectId }: { projectId: string }) {
   const [nativeBuilds, setNativeBuilds] = useState<NativeBuildInfo[]>([]);
   const [nbOpen, setNbOpen] = useState(false);
   const [nbBusy, setNbBusy] = useState(false);
+  const [cloudInst, setCloudInst] = useState<CloudInstanceInfo | null>(null);
+  const [cloudOpen, setCloudOpen] = useState(false);
+  const [cloudBusy, setCloudBusy] = useState(false);
   const [pickMode, setPickMode] = useState(false);
   const [pickTarget, setPickTarget] = useState<{ selector: string; snippet: string; label: string } | null>(null);
   const [reports, setReports] = useState<AppReport[]>([]);
@@ -528,6 +541,39 @@ export default function Builder({ projectId }: { projectId: string }) {
       await loadNativeBuilds();
     } finally {
       setNbBusy(false);
+    }
+  }
+
+  // Fusion Cloud: 214 模拟云实例(云端构建+托管+时租)。
+  const loadCloud = useCallback(async () => {
+    const res = await fetch(`/api/projects/${projectId}/cloud`);
+    if (!res.ok) return;
+    const data = await res.json().catch(() => ({}));
+    setCloudInst(data.instance ?? null);
+  }, [projectId]);
+
+  useEffect(() => {
+    if (cloudInst?.status !== "deploying") return;
+    const t = setInterval(loadCloud, 5000);
+    return () => clearInterval(t);
+  }, [cloudInst?.status, loadCloud]);
+
+  async function cloudAction(action: "deploy" | "start" | "stop" | "delete") {
+    if (cloudBusy) return;
+    if (action === "delete" && !confirm("删除云实例?(214 上的托管目录一并清除)")) return;
+    setCloudBusy(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/cloud`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) pushError(data.error || "云操作失败");
+      else if (action === "deploy") window.dispatchEvent(new Event("credits-changed"));
+      await loadCloud();
+    } finally {
+      setCloudBusy(false);
     }
   }
 
@@ -1072,6 +1118,93 @@ export default function Builder({ projectId }: { projectId: string }) {
             <div className="relative">
               <button
                 className="btn-ghost px-3 py-1.5 text-xs"
+                onClick={() => {
+                  if (!cloudOpen) loadCloud();
+                  setCloudOpen(!cloudOpen);
+                }}
+                title="Fusion Cloud:214 模拟云主机 —— 云端构建 + 常驻托管 + 按小时计费"
+              >
+                ⚡ 云实例
+                {cloudInst?.status === "running" && <span className="ml-1 text-good animate-pulse">●</span>}
+                {cloudInst?.status === "deploying" && <span className="ml-1 text-amber animate-pulse">●</span>}
+              </button>
+              {cloudOpen && (
+                <div className="absolute right-0 top-full mt-1 card p-3 z-20 w-80 max-w-[90vw] flex flex-col gap-2.5 text-xs">
+                  <p className="font-mono text-[10px] tracking-widest text-muted">FUSION CLOUD · 模拟云主机(214)</p>
+                  {!cloudInst ? (
+                    <>
+                      <p className="text-muted leading-relaxed">
+                        把已发布制品部署到云上:{detail?.project.engine === "project" ? "云端真实执行 npm/vite 构建(日志可见)" : "构建产物直传托管"},
+                        常驻运行,公网可访问。计费:部署 2 积分 + 运行 1 积分/小时(余额不足自动停机,可在 💰 钱包 查看)。
+                      </p>
+                      <button className="btn-primary px-3 py-1.5" disabled={cloudBusy} onClick={() => cloudAction("deploy")}>
+                        {cloudBusy ? "部署中…" : "🚀 部署到 Fusion Cloud(2 积分)"}
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={
+                            cloudInst.status === "running"
+                              ? "text-good"
+                              : cloudInst.status === "error"
+                                ? "text-bad"
+                                : cloudInst.status === "deploying"
+                                  ? "text-amber"
+                                  : "text-muted"
+                          }
+                        >
+                          {cloudInst.status === "running"
+                            ? "● 运行中"
+                            : cloudInst.status === "deploying"
+                              ? "⏳ 部署中(云端构建)…"
+                              : cloudInst.status === "stopped"
+                                ? "⏸ 已停止(不计费)"
+                                : "✗ 部署失败"}
+                        </span>
+                        {cloudInst.artifact_seq != null && <span className="text-muted">制品 #{cloudInst.artifact_seq}</span>}
+                        <span className="text-muted ml-auto">{cloudInst.hourly_rate} 积分/小时</span>
+                      </div>
+                      {cloudInst.status === "running" && (
+                        <a href={`/c/${cloudInst.slug}`} target="_blank" rel="noopener" className="font-mono text-accent hover:underline">
+                          /c/{cloudInst.slug} ↗
+                        </a>
+                      )}
+                      {cloudInst.error && <p className="text-bad break-words">{cloudInst.error}</p>}
+                      {cloudInst.log_tail && (
+                        <details>
+                          <summary className="cursor-pointer text-muted">云端构建日志</summary>
+                          <pre className="mt-1 p-1.5 bg-bg-deep rounded max-h-32 overflow-auto whitespace-pre-wrap text-[10px]">
+                            {cloudInst.log_tail}
+                          </pre>
+                        </details>
+                      )}
+                      <div className="flex gap-2 pt-1 border-t border-line">
+                        <button className="btn-primary px-3 py-1.5 flex-1" disabled={cloudBusy || cloudInst.status === "deploying"} onClick={() => cloudAction("deploy")}>
+                          重新部署(2 积分)
+                        </button>
+                        {cloudInst.status === "running" ? (
+                          <button className="btn-ghost px-3 py-1.5" disabled={cloudBusy} onClick={() => cloudAction("stop")}>
+                            停止
+                          </button>
+                        ) : cloudInst.status === "stopped" ? (
+                          <button className="btn-ghost px-3 py-1.5" disabled={cloudBusy} onClick={() => cloudAction("start")}>
+                            启动
+                          </button>
+                        ) : null}
+                        <button className="btn-ghost px-2 py-1.5 text-muted hover:text-bad" disabled={cloudBusy} onClick={() => cloudAction("delete")}>
+                          删除
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="relative">
+              <button
+                className="btn-ghost px-3 py-1.5 text-xs"
                 onClick={() => setDeployOpen(!deployOpen)}
                 title="部署到本机或外部云"
               >
@@ -1133,7 +1266,8 @@ export default function Builder({ projectId }: { projectId: string }) {
                         {t.id === "local" && <span className="text-good">● 已部署(默认)</span>}
                         {t.status === "experimental" && <span className="text-amber">实验性</span>}
                         {t.status === "planned" && <span className="text-muted">规划中</span>}
-                        {t.id !== "local" && t.status !== "planned" && (
+                        {t.id === "cloud214" && cloudInst?.status === "running" && <span className="text-good">● 运行中</span>}
+                        {t.id !== "local" && t.id !== "cloud214" && t.status !== "planned" && (
                           <button
                             className="btn-primary px-3 py-1 ml-auto"
                             disabled={!!deployBusy || (t.id === "netlify" && !netlifyToken)}

@@ -13,7 +13,8 @@ export default async function Dashboard() {
   const projects = db
     .prepare(
       `SELECT p.id, p.name, p.slug, p.published_version_id, p.updated_at,
-              (SELECT COUNT(*) FROM app_versions v WHERE v.project_id = p.id) AS version_count
+              (SELECT COUNT(*) FROM app_versions v WHERE v.project_id = p.id) AS version_count,
+              (SELECT j.status FROM jobs j WHERE j.project_id = p.id AND j.status IN ('queued','running') LIMIT 1) AS active_status
        FROM projects p WHERE p.user_id = ? ORDER BY p.updated_at DESC`
     )
     .all(user.id)

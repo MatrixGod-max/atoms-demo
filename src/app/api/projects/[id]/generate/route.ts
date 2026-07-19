@@ -2,10 +2,10 @@ import { NextResponse } from "next/server";
 import { db, now } from "@/lib/db";
 import { getUser } from "@/lib/auth";
 import { ownedProject } from "@/lib/projects";
-import { jobRunner } from "@/lib/jobs";
+import { canStartJob, jobRunner } from "@/lib/jobs";
 import { rateLimit } from "@/lib/ratelimit";
 import { normalizeMode } from "@/lib/models";
-import { balance, charge, generationCost } from "@/lib/credits";
+import { PLAN_GEN_PER_10MIN, balance, charge, generationCost } from "@/lib/credits";
 
 export const dynamic = "force-dynamic";
 
@@ -33,10 +33,16 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
         }
       : null;
 
-  const rl = rateLimit(`gen:${user.id}`, 3, 10 * 60_000);
+  // Per-plan concurrency gate first: a rejected attempt must not burn a
+  // rate-limit slot (rateLimit records on every call) nor touch credits.
+  const can = canStartJob(user.id, user.plan);
+  if (!can.ok) return NextResponse.json({ error: can.error }, { status: 429 });
+
+  const genLimit = PLAN_GEN_PER_10MIN[user.plan] ?? 3;
+  const rl = rateLimit(`gen:${user.id}`, genLimit, 10 * 60_000);
   if (!rl.ok) {
     return NextResponse.json(
-      { error: `生成过于频繁(10 分钟内最多 3 次),请 ${rl.retryAfterSec} 秒后再试` },
+      { error: `生成过于频繁(10 分钟内最多 ${genLimit} 次),请 ${rl.retryAfterSec} 秒后再试` },
       { status: 429 }
     );
   }

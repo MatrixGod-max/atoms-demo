@@ -176,6 +176,25 @@ function createDb(): DatabaseSync {
   );
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_domain ON projects(domain_name) WHERE domain_name IS NOT NULL");
   db.exec("CREATE INDEX IF NOT EXISTS idx_credit_events_user ON credit_events(user_id, created_at)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_jobs_user ON jobs(user_id, status)");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS cloud_instances (
+      id             TEXT PRIMARY KEY,
+      project_id     TEXT NOT NULL UNIQUE REFERENCES projects(id) ON DELETE CASCADE,
+      user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      slug           TEXT NOT NULL,
+      status         TEXT NOT NULL CHECK (status IN ('deploying','running','stopped','error')),
+      artifact_seq   INTEGER,
+      hourly_rate    INTEGER NOT NULL DEFAULT 1,
+      log            TEXT,
+      error          TEXT,
+      deployed_at    INTEGER,
+      last_billed_at INTEGER,
+      created_at     INTEGER NOT NULL,
+      updated_at     INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_cloud_instances_status ON cloud_instances(status);
+  `);
   db.exec(`
     CREATE TABLE IF NOT EXISTS native_builds (
       id             TEXT PRIMARY KEY,

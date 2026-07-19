@@ -69,9 +69,35 @@ export async function launchProject(
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return { error: data.error || `创建失败 (${res.status})` };
-  sessionStorage.setItem(
-    `quark_pending_${data.id}`,
-    JSON.stringify({ prompt, research: !!opts.research, team: !!opts.team, mode: opts.mode ?? "fast", goal: !!opts.goal })
-  );
   return { id: data.id };
+}
+
+export interface GenerateStartResult {
+  jobId: string;
+  position: number;
+}
+
+/**
+ * Starts generation server-side (multi-task): callers create the project,
+ * upload attachments, then fire this — with or without navigating to the
+ * Builder, which attaches to the active job on boot either way.
+ */
+export async function startGeneration(
+  projectId: string,
+  payload: { prompt: string; research?: boolean; team?: boolean; mode?: "fast" | "mixed" | "deep"; goalLoop?: boolean }
+): Promise<GenerateStartResult | { error: string; status: number }> {
+  const res = await fetch(`/api/projects/${projectId}/generate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      prompt: payload.prompt,
+      research: !!payload.research,
+      team: !!payload.team,
+      mode: payload.mode ?? "fast",
+      goalLoop: payload.goalLoop || undefined,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return { error: data.error || `启动失败 (${res.status})`, status: res.status };
+  return { jobId: data.jobId, position: data.position ?? 0 };
 }

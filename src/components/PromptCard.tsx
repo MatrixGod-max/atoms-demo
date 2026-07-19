@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { useSpeech } from "@/lib/useSpeech";
-import { CLIENT_MAX_ATTACHMENTS, THEME_PRESETS, encodeFileBase64, inferMime, launchProject, precheckFile } from "@/lib/launch";
+import { CLIENT_MAX_ATTACHMENTS, THEME_PRESETS, encodeFileBase64, inferMime, launchProject, precheckFile, startGeneration } from "@/lib/launch";
 import { CONNECTORS as CONNECTOR_LIST } from "@/lib/connectorRegistry";
 
 const EXAMPLES = ["一个番茄钟专注应用", "极简记账本,支持分类统计", "习惯打卡日历", "团队站会抽签转盘"];
@@ -53,6 +53,7 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
   const [themeOpen, setThemeOpen] = useState(false);
   const [buildOpen, setBuildOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [bgDone, setBgDone] = useState<{ projectId: string } | null>(null);
   const [error, setError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -90,10 +91,11 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
     setFiles(next);
   }
 
-  async function submit() {
+  async function submit(background = false) {
     const trimmed = prompt.trim();
     if (!trimmed || busy) return;
     setError("");
+    setBgDone(null);
     closeMenus();
     const goal = goalMode ? goalText.trim() || trimmed : null;
     if (!loggedIn) {
@@ -108,7 +110,7 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
       setBusy(false);
       return;
     }
-    // Upload attachments before entering the Builder so the first generation sees them.
+    // Upload attachments before starting generation so the first run sees them.
     const failed: string[] = [];
     for (const f of files) {
       try {
@@ -123,6 +125,24 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
       }
     }
     if (failed.length) console.warn(`附件上传失败:${failed.join("、")}`);
+    const gen = await startGeneration(result.id, { prompt: trimmed, research, team: teamMode, mode: genMode, goalLoop: !!goal });
+    if ("error" in gen) {
+      // 429 并发上限 / 402 积分不足等:项目已创建但未开跑,双模式都留在原页说明。
+      setError(`${gen.error}(项目已创建,可稍后在「我的项目」中打开继续)`);
+      setBusy(false);
+      return;
+    }
+    window.dispatchEvent(new Event("credits-changed"));
+    window.dispatchEvent(new Event("jobs-changed"));
+    if (background) {
+      setBgDone({ projectId: result.id });
+      setPrompt("");
+      setFiles([]);
+      setGoalText("");
+      setGoalMode(false);
+      setBusy(false);
+      return;
+    }
     router.push(`/project/${result.id}`);
   }
 
@@ -382,11 +402,23 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
                 <rect x="13" y="7" width="2" height="2" rx="1" />
               </svg>
             </button>
+            {loggedIn && (
+              <button
+                type="button"
+                aria-label="后台构建"
+                title="后台构建:任务在后台运行,留在本页可连续发起多个"
+                className="w-9 h-9 rounded-full border border-line text-muted hover:text-ink hover:bg-bg-deep flex items-center justify-center transition-colors disabled:opacity-35 disabled:cursor-not-allowed"
+                onClick={() => submit(true)}
+                disabled={busy || !prompt.trim()}
+              >
+                <span className="text-sm leading-none">⇉</span>
+              </button>
+            )}
             <button
               type="button"
               aria-label="开始构建"
               className="w-9 h-9 rounded-full bg-ink text-white flex items-center justify-center hover:brightness-150 transition-all disabled:opacity-35 disabled:cursor-not-allowed"
-              onClick={submit}
+              onClick={() => submit(false)}
               disabled={busy || !prompt.trim()}
             >
               {busy ? (
@@ -465,6 +497,18 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
       )}
 
       {error && <p className="text-bad text-sm mt-2">{error}</p>}
+      {bgDone && (
+        <p className="text-good text-sm mt-2">
+          ✓ 已开始后台构建 ·{" "}
+          <button
+            type="button"
+            className="underline hover:text-ink"
+            onClick={() => window.dispatchEvent(new Event("open-task-center"))}
+          >
+            前往任务中心
+          </button>
+        </p>
+      )}
       {speech.error && <p className="text-bad text-sm mt-2">🎙 {speech.error}</p>}
       {speech.state === "listening" && <p className="text-bad text-sm mt-2 animate-pulse">● 录音中…再点一次麦克风结束并转写</p>}
       {speech.state === "transcribing" && <p className="text-amber text-sm mt-2">🎙 转写中…</p>}

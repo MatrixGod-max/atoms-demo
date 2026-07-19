@@ -311,8 +311,65 @@ SPCODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/api/speech/tr
 [ "$SPCODE" = "401" ] || fail "unauth speech should 401, got $SPCODE"
 rm -f /tmp/quark-smoke-audio.webm
 
+step "v21: Fusion Cloud — 部署/公网访问/停止/删除(需服务端 CLOUD_MOCK=1)"
+curl -fsS -b "$OWNER_JAR" -X POST "$BASE_URL/api/projects/$PROJ/cloud" \
+  -H 'content-type: application/json' -d '{"action":"deploy"}' | grep -q '"status":"running"' || fail "cloud deploy"
+curl -fsS "$BASE_URL/c/$SLUG" | grep -q "mock cloud app" || fail "cloud proxy should serve app"
+curl -fsS -b "$OWNER_JAR" -X POST "$BASE_URL/api/projects/$PROJ/cloud" \
+  -H 'content-type: application/json' -d '{"action":"stop"}' | grep -q '"status":"stopped"' || fail "cloud stop"
+CCODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/c/$SLUG")
+[ "$CCODE" = "503" ] || fail "stopped instance should 503, got $CCODE"
+curl -fsS -b "$OWNER_JAR" "$BASE_URL/api/wallet" | grep -q '"cloud-deploy"' || fail "wallet should show cloud-deploy event"
+curl -fsS -b "$OWNER_JAR" -X POST "$BASE_URL/api/projects/$PROJ/cloud" \
+  -H 'content-type: application/json' -d '{"action":"delete"}' | grep -q '"ok":true' || fail "cloud delete"
+
 step "unauthenticated dashboard access is redirected"
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/dashboard")
 [ "$CODE" = "307" ] || [ "$CODE" = "302" ] || fail "dashboard should redirect, got $CODE"
+
+step "multi-task: pro account fires two projects concurrently"
+MJAR="$(mktemp)"
+curl -fsS -c "$MJAR" -X POST "$BASE_URL/api/auth/register" \
+  -H 'content-type: application/json' \
+  -d "{\"email\":\"mt-$EMAIL\",\"password\":\"Smoke2026ci\"}" | grep -q '"ok":true' || fail "register multitask account"
+curl -fsS -b "$MJAR" -X POST "$BASE_URL/api/plan" \
+  -H 'content-type: application/json' -d '{"plan":"pro"}' | grep -q '"ok":true' || fail "switch to pro"
+MPA=$(curl -fsS -b "$MJAR" -X POST "$BASE_URL/api/projects" \
+  -H 'content-type: application/json' -d '{"prompt":"多任务甲"}' | sed -E 's/.*"id":"([^"]+)".*/\1/')
+MPB=$(curl -fsS -b "$MJAR" -X POST "$BASE_URL/api/projects" \
+  -H 'content-type: application/json' -d '{"prompt":"多任务乙"}' | sed -E 's/.*"id":"([^"]+)".*/\1/')
+MJA=$(curl -fsS -b "$MJAR" -X POST "$BASE_URL/api/projects/$MPA/generate" \
+  -H 'content-type: application/json' -d '{"prompt":"多任务甲"}' | sed -E 's/.*"jobId":"([^"]+)".*/\1/')
+[ -n "$MJA" ] || fail "multitask first generate"
+MJB=$(curl -fsS -b "$MJAR" -X POST "$BASE_URL/api/projects/$MPB/generate" \
+  -H 'content-type: application/json' -d '{"prompt":"多任务乙"}' | sed -E 's/.*"jobId":"([^"]+)".*/\1/')
+[ -n "$MJB" ] || fail "multitask second generate should be allowed on pro"
+MLIST=$(curl -fsS -b "$MJAR" "$BASE_URL/api/jobs")
+echo "$MLIST" | grep -q "$MPA" || fail "GET /api/jobs missing project A"
+echo "$MLIST" | grep -q "$MPB" || fail "GET /api/jobs missing project B"
+
+step "multi-task: free account second concurrent fire is rejected"
+FJAR="$(mktemp)"
+curl -fsS -c "$FJAR" -X POST "$BASE_URL/api/auth/register" \
+  -H 'content-type: application/json' \
+  -d "{\"email\":\"ft-$EMAIL\",\"password\":\"Smoke2026ci\"}" | grep -q '"ok":true' || fail "register free account"
+FPA=$(curl -fsS -b "$FJAR" -X POST "$BASE_URL/api/projects" \
+  -H 'content-type: application/json' -d '{"prompt":"免费甲"}' | sed -E 's/.*"id":"([^"]+)".*/\1/')
+FPB=$(curl -fsS -b "$FJAR" -X POST "$BASE_URL/api/projects" \
+  -H 'content-type: application/json' -d '{"prompt":"免费乙"}' | sed -E 's/.*"id":"([^"]+)".*/\1/')
+curl -fsS -b "$FJAR" -X POST "$BASE_URL/api/projects/$FPA/generate" \
+  -H 'content-type: application/json' -d '{"prompt":"免费甲"}' >/dev/null || fail "free first generate"
+FRESP=$(curl -s -b "$FJAR" -X POST "$BASE_URL/api/projects/$FPB/generate" \
+  -H 'content-type: application/json' -d '{"prompt":"免费乙"}')
+echo "$FRESP" | grep -q '同时构建数已达' || fail "free second fire should hit concurrency cap, got: $FRESP"
+
+step "multi-task: jobs drain to recent"
+for i in $(seq 1 60); do
+  MLEFT=$(curl -fsS -b "$MJAR" "$BASE_URL/api/jobs" | grep -o '"jobs":\[[^]]*\]')
+  [ "$MLEFT" = '"jobs":[]' ] && break
+  sleep 2
+done
+curl -fsS -b "$MJAR" "$BASE_URL/api/jobs" | grep -q '"recent":\[{' || fail "recent should list finished jobs"
+rm -f "$MJAR" "$FJAR"
 
 echo "SMOKE OK"

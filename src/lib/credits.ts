@@ -54,6 +54,14 @@ export const PLANS: Plan[] = ["free", "pro", "max"];
 /** One-time credit bonus granted when switching to a paid tier (demo, no real billing). */
 export const PLAN_BONUS: Record<Plan, number> = { free: 0, pro: 100, max: 400 };
 
+export const PLAN_LABELS: Record<Plan, string> = { free: "免费版", pro: "专业版", max: "旗舰版" };
+
+/** 按套餐分级的同时构建数上限(多任务)。 */
+export const PLAN_CONCURRENCY: Record<Plan, number> = { free: 1, pro: 2, max: 3 };
+
+/** 按套餐分级的 10 分钟生成次数上限(多任务需要能快速连发)。 */
+export const PLAN_GEN_PER_10MIN: Record<Plan, number> = { free: 3, pro: 6, max: 9 };
+
 export function switchPlan(userId: string, plan: Plan): { ok: true; bonus: number } | { ok: false; error: string } {
   const row = db.prepare("SELECT plan FROM users WHERE id = ?").get(userId) as { plan: string } | undefined;
   if (!row) return { ok: false, error: "用户不存在" };
@@ -81,6 +89,18 @@ export function redeemCode(userId: string, rawCode: string): { ok: true; amount:
   if (Number(res.changes) === 0) return { ok: false, error: "该兑换码已被使用" };
   recordEvent(userId, row.amount, `redeem:${code}`);
   return { ok: true, amount: row.amount };
+}
+
+export type WalletCategory = "生成" | "打包" | "云服务" | "充值奖励" | "退款" | "其他";
+
+/** AI 钱包的流水归类:按 reason 前缀把 credit_events 聚合成消费/收入类别。 */
+export function classifyReason(reason: string): WalletCategory {
+  if (reason.startsWith("generate:") || reason.startsWith("goal-round:")) return "生成";
+  if (reason.startsWith("native-build")) return "打包";
+  if (reason.startsWith("cloud-")) return "云服务";
+  if (reason.startsWith("redeem:") || reason.startsWith("plan:") || reason === "signup" || reason === "banner") return "充值奖励";
+  if (reason.startsWith("refund:")) return "退款";
+  return "其他";
 }
 
 export function recentEvents(userId: string, limit = 20) {

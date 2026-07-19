@@ -18,6 +18,7 @@ export default defineConfig({
       AGENT_MOCK: "1",
       NATIVE_BUILD_MOCK: "1",
       SPEECH_MOCK: "1",
+      CLOUD_MOCK: "1",
       CONNECTOR_MOCK: "1",
     },
     testTimeout: 60_000,

@@ -11,6 +11,7 @@ export interface ProjectSummary {
   published_version_id: string | null;
   updated_at: number;
   version_count: number;
+  active_status?: "queued" | "running" | null;
 }
 
 export default function ProjectCard({ project }: { project: ProjectSummary }) {
@@ -43,6 +44,8 @@ export default function ProjectCard({ project }: { project: ProjectSummary }) {
       <div className="flex items-center gap-3 mt-4 text-xs text-muted font-mono">
         <span>v{project.version_count}</span>
         <span>{new Date(project.updated_at).toLocaleDateString("zh-CN")}</span>
+        {project.active_status === "running" && <span className="text-accent animate-pulse">⚙ 构建中</span>}
+        {project.active_status === "queued" && <span className="text-amber animate-pulse">⏳ 排队中</span>}
         {published && (
           <span
             className="text-good cursor-pointer hover:underline"

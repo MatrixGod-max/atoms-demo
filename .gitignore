@@ -57,3 +57,4 @@ docs/*.tmp.png
 .next-ci/
 .e2e-data/
 .smoke-data*/
+.vitest-tmp/
