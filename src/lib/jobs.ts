@@ -1,20 +1,23 @@
 import { db, now } from "./db";
 import { newId } from "./auth";
-import { runPipeline, type AgentEvent, type AppSpec } from "./agent";
+import { runPipeline, runGoalEval, type AgentEvent, type AppSpec, type GoalEvalResult } from "./agent";
 import { inlineImageAssets, loadPipelineAttachments } from "./attachments";
 import type { GenerationMode } from "./models";
-import { recordEvent } from "./credits";
+import { charge, generationCost, recordEvent } from "./credits";
 import { parseConnectors } from "./connectors";
 
 const MAX_CONCURRENT = 2;
 const BUFFER_CAP = 9000;
 const RETAIN_DONE_MS = 10 * 60_000;
+const DAILY_QUOTA = Number(process.env.DAILY_GENERATION_QUOTA || 30);
 
 export type JobStreamEvent =
   | AgentEvent
   | { type: "version"; version: { id: string; num: number } }
   | { type: "queued"; position: number }
-  | { type: "job_state"; status: "queued" | "running" | "done" | "error"; error?: string };
+  | { type: "job_state"; status: "queued" | "running" | "done" | "error"; error?: string }
+  | { type: "goal_eval"; result: GoalEvalResult; round: number; maxRounds: number }
+  | { type: "goal_next"; jobId: string; round: number; prompt: string };
 
 export interface JobRow {
   id: string;
@@ -35,6 +38,7 @@ interface LiveJob {
   team: boolean;
   mode: GenerationMode;
   cost: number;
+  target: { selector: string; snippet: string } | null;
   history: { role: "user" | "agent"; content: string }[];
   buffer: string[];
   droppedDeltas: boolean;
@@ -48,10 +52,15 @@ class JobRunner {
   private running = 0;
 
   constructor() {
-    // The process just started: nothing can still be running.
-    db.prepare(
-      "UPDATE jobs SET status='error', error='服务重启,任务中断', updated_at=? WHERE status IN ('queued','running')"
-    ).run(now());
+    // The process just started: nothing can still be running. Only the real
+    // server runtime may claim this — vitest collector forks and next-build
+    // workers import this module too and must not stomp a live process's DB.
+    if (!process.env.VITEST && process.env.NEXT_PHASE !== "phase-production-build") {
+      db.prepare(
+        "UPDATE jobs SET status='error', error='服务重启,任务中断', updated_at=? WHERE status IN ('queued','running')"
+      ).run(now());
+      db.prepare("UPDATE projects SET goal_active = 0, goal_status = 'stopped' WHERE goal_active = 1").run();
+    }
   }
 
   activeJobForProject(projectId: string): JobRow | undefined {
@@ -75,7 +84,9 @@ class JobRunner {
     research = false,
     mode: GenerationMode = "fast",
     team = false,
-    cost = 0
+    cost = 0,
+    target: { selector: string; snippet: string } | null = null,
+    auto = false
   ): { jobId: string; position: number } {
     const existing = this.activeJobForProject(projectId);
     if (existing) {
@@ -95,10 +106,11 @@ class JobRunner {
     db.prepare(
       "INSERT INTO jobs (id, project_id, user_id, prompt, status, mode, team, created_at, updated_at) VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?)"
     ).run(jobId, projectId, userId, prompt, mode, team ? 1 : 0, t, t);
-    db.prepare("INSERT INTO messages (id, project_id, role, content, created_at) VALUES (?, ?, 'user', ?, ?)").run(
+    db.prepare("INSERT INTO messages (id, project_id, role, content, meta, created_at) VALUES (?, ?, 'user', ?, ?, ?)").run(
       newId("m"),
       projectId,
       prompt,
+      auto ? "goal_auto" : null,
       t
     );
 
@@ -111,6 +123,7 @@ class JobRunner {
       team,
       mode,
       cost,
+      target,
       history,
       buffer: [],
       droppedDeltas: false,
@@ -179,8 +192,8 @@ class JobRunner {
     this.setStatus(job.id, "running");
     this.emit(job, { type: "job_state", status: "running" });
     try {
-      const project = db.prepare("SELECT current_version_id, platform, theme, connectors FROM projects WHERE id = ?").get(job.projectId) as
-        | { current_version_id: string | null; platform: "web" | "mobile"; theme: string | null; connectors: string | null }
+      const project = db.prepare("SELECT current_version_id, platform, theme, connectors, goal, acceptance, fused_from FROM projects WHERE id = ?").get(job.projectId) as
+        | { current_version_id: string | null; platform: "web" | "mobile"; theme: string | null; connectors: string | null; goal: string | null; acceptance: string | null; fused_from: string | null }
         | undefined;
       if (!project) throw new Error("项目已被删除");
       const currentVersion = project.current_version_id
@@ -190,7 +203,35 @@ class JobRunner {
         : undefined;
 
       const attachments = loadPipelineAttachments(job.projectId);
+      let acceptance: string[] | null = null;
+      try {
+        acceptance = project.acceptance ? (JSON.parse(project.acceptance) as string[]) : null;
+      } catch {
+        acceptance = null;
+      }
+      // 聚变 first generation: load both published sources for the Fusion Analyst.
+      let fusionSources: { name: string; html: string; spec: string | null }[] | null = null;
+      if (project.fused_from && !project.current_version_id) {
+        try {
+          const from = JSON.parse(project.fused_from) as { slug: string; name: string }[];
+          const rows = from
+            .map(
+              (f) =>
+                db
+                  .prepare(
+                    `SELECT p.name, v.html, v.spec FROM projects p JOIN app_versions v ON v.id = p.published_version_id
+                     WHERE p.slug = ? AND p.published_version_id IS NOT NULL`
+                  )
+                  .get(f.slug) as { name: string; html: string; spec: string | null } | undefined
+            )
+            .filter((r): r is { name: string; html: string; spec: string | null } => !!r);
+          if (rows.length === 2) fusionSources = rows;
+        } catch {
+          fusionSources = null;
+        }
+      }
       let spec: AppSpec | null = null;
+      let producedHtml: string | null = null;
       for await (const event of runPipeline({
         request: job.prompt,
         history: job.history,
@@ -203,6 +244,10 @@ class JobRunner {
         connectors: parseConnectors(project.connectors),
         attachments,
         mode: job.mode,
+        target: job.target,
+        goal: project.goal,
+        acceptance,
+        fusionSources,
       })) {
         if (event.type === "plan") spec = event.spec;
         if (event.type === "stage" && event.status === "start") {
@@ -211,6 +256,13 @@ class JobRunner {
         if (event.type === "pm" || event.type === "architect") {
           if (event.type === "pm") {
             spec = { name: event.stories.name, summary: event.stories.summary, features: event.stories.stories.slice(0, 5), design: "" };
+            if (Array.isArray(event.stories.acceptance) && event.stories.acceptance.length) {
+              // Persist PM acceptance criteria: later iterations re-verify against them.
+              db.prepare("UPDATE projects SET acceptance = ? WHERE id = ?").run(
+                JSON.stringify(event.stories.acceptance.slice(0, 6)),
+                job.projectId
+              );
+            }
           }
           db.prepare(
             "INSERT INTO messages (id, project_id, role, content, meta, created_at) VALUES (?, ?, 'agent', ?, ?, ?)"
@@ -222,6 +274,26 @@ class JobRunner {
           db.prepare(
             "INSERT INTO messages (id, project_id, role, content, meta, created_at) VALUES (?, ?, 'agent', ?, 'research', ?)"
           ).run(newId("m"), job.projectId, JSON.stringify(event.brief), now());
+          this.emit(job, event);
+          continue;
+        }
+        if (event.type === "fusion") {
+          spec = {
+            name: event.plan.name,
+            summary: event.plan.summary,
+            features: [...event.plan.from_a, ...event.plan.from_b].slice(0, 5),
+            design: "",
+          };
+          db.prepare(
+            "INSERT INTO messages (id, project_id, role, content, meta, created_at) VALUES (?, ?, 'agent', ?, 'fusion', ?)"
+          ).run(newId("m"), job.projectId, JSON.stringify(event.plan), now());
+          this.emit(job, event);
+          continue;
+        }
+        if (event.type === "acceptance") {
+          db.prepare(
+            "INSERT INTO messages (id, project_id, role, content, meta, created_at) VALUES (?, ?, 'agent', ?, 'acceptance', ?)"
+          ).run(newId("m"), job.projectId, JSON.stringify(event.results), now());
           this.emit(job, event);
           continue;
         }
@@ -239,6 +311,7 @@ class JobRunner {
           db.prepare(
             "UPDATE projects SET current_version_id = ?, updated_at = ?, name = COALESCE(?, name) WHERE id = ?"
           ).run(versionId, now(), spec?.name ?? null, job.projectId);
+          producedHtml = finalHtml;
           this.emit(job, { type: "version", version: { id: versionId, num } });
         } else if (event.type === "agent_message") {
           db.prepare("INSERT INTO messages (id, project_id, role, content, created_at) VALUES (?, ?, 'agent', ?, ?)").run(
@@ -252,7 +325,18 @@ class JobRunner {
           this.emit(job, event);
         }
       }
+      // Goal mode: evaluate this round and possibly chain the next one.
+      const next = await this.evaluateGoal(job, producedHtml);
       this.setStatus(job.id, "done");
+      if (next) {
+        try {
+          const started = this.start(job.projectId, job.userId, next.prompt, job.research, job.mode, job.team, next.cost, null, true);
+          this.emit(job, { type: "goal_next", jobId: started.jobId, round: next.round, prompt: next.prompt });
+        } catch {
+          recordEvent(job.userId, next.cost, "refund:failed-job");
+          this.endGoal(job, "error", "🎯 下一轮启动失败,自动迭代结束");
+        }
+      }
       this.emit(job, { type: "job_state", status: "done" });
     } catch (err) {
       const message = err instanceof Error ? err.message : "生成失败";
@@ -261,11 +345,86 @@ class JobRunner {
       ).run(newId("m"), job.projectId, `生成失败:${message}`, now());
       this.setStatus(job.id, "error", { error: message });
       if (job.cost > 0) recordEvent(job.userId, job.cost, "refund:failed-job");
+      const g = db.prepare("SELECT goal_active FROM projects WHERE id = ?").get(job.projectId) as
+        | { goal_active: number }
+        | undefined;
+      if (g?.goal_active) this.endGoal(job, "error", "🎯 本轮生成失败,自动迭代结束");
       this.emit(job, { type: "error", message });
       this.emit(job, { type: "job_state", status: "error", error: message });
     } finally {
       job.done = true;
     }
+  }
+
+  /**
+   * Goal-mode round boundary: judge the freshly produced version against the goal,
+   * then decide to finish or charge & chain the next auto round. Returns the next
+   * round to start, or null when the loop ends (or no goal loop is active).
+   */
+  private async evaluateGoal(job: LiveJob, html: string | null): Promise<{ prompt: string; cost: number; round: number } | null> {
+    const project = db
+      .prepare("SELECT goal, goal_active, goal_round, goal_rounds, goal_status FROM projects WHERE id = ?")
+      .get(job.projectId) as
+      | { goal: string | null; goal_active: number; goal_round: number; goal_rounds: number; goal_status: string | null }
+      | undefined;
+    if (!project?.goal || !html) return null;
+    if (!project.goal_active) {
+      // Externally stopped between rounds (or never armed): confirm once, never overwrite a settled status.
+      if (project.goal_status === "running") this.endGoal(job, "stopped", "⏹ 已按你的要求停止自动迭代");
+      return null;
+    }
+
+    const round = project.goal_round + 1;
+    db.prepare("UPDATE projects SET goal_round = ? WHERE id = ?").run(round, job.projectId);
+    let result: GoalEvalResult;
+    try {
+      result = await runGoalEval({ goal: project.goal, html, round, maxRounds: project.goal_rounds, mode: job.mode });
+    } catch {
+      this.endGoal(job, "error", "🎯 目标评估失败,自动迭代结束");
+      return null;
+    }
+    db.prepare(
+      "INSERT INTO messages (id, project_id, role, content, meta, created_at) VALUES (?, ?, 'agent', ?, 'goal_eval', ?)"
+    ).run(newId("m"), job.projectId, JSON.stringify({ ...result, round, maxRounds: project.goal_rounds }), now());
+    this.emit(job, { type: "goal_eval", result, round, maxRounds: project.goal_rounds });
+
+    // The user may have hit stop while the evaluator was running.
+    const fresh = db.prepare("SELECT goal_active FROM projects WHERE id = ?").get(job.projectId) as { goal_active: number };
+    if (!fresh.goal_active) return null;
+
+    if (result.met) {
+      this.endGoal(job, "met", `🎯 目标已达成(第 ${round} 轮,评分 ${result.score})`);
+      return null;
+    }
+    if (round >= project.goal_rounds) {
+      this.endGoal(job, "cap", `🎯 已达轮次上限(${project.goal_rounds} 轮),自动迭代结束`);
+      return null;
+    }
+    const dayCount = (
+      db.prepare("SELECT COUNT(*) AS c FROM jobs WHERE user_id = ? AND created_at > ?").get(job.userId, now() - 86_400_000) as { c: number }
+    ).c;
+    if (dayCount >= DAILY_QUOTA) {
+      this.endGoal(job, "cap", "🎯 已达今日生成次数上限,自动迭代结束");
+      return null;
+    }
+    const cost = generationCost(job.mode, job.research, job.team);
+    if (!charge(job.userId, cost, `goal-round:${round + 1}`)) {
+      this.endGoal(job, "no_credits", `🎯 积分不足(下一轮需 ${cost}),自动迭代结束`);
+      return null;
+    }
+    const prompt = result.next_request?.trim() || `继续向目标推进:${project.goal}`;
+    return { prompt, cost, round: round + 1 };
+  }
+
+  private endGoal(job: LiveJob, status: string, text: string) {
+    db.prepare("UPDATE projects SET goal_active = 0, goal_status = ? WHERE id = ?").run(status, job.projectId);
+    db.prepare("INSERT INTO messages (id, project_id, role, content, created_at) VALUES (?, ?, 'agent', ?, ?)").run(
+      newId("m"),
+      job.projectId,
+      text,
+      now()
+    );
+    this.emit(job, { type: "agent_message", content: text });
   }
 }
 

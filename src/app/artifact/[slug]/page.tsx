@@ -87,6 +87,13 @@ export default async function ArtifactPage({ params }: { params: Promise<{ slug:
             <Link href={`/remix/${slug}`} className="btn-ghost px-4 py-2 text-sm text-accent">
               ⚛ Remix
             </Link>
+            <Link
+              href={`/resources?fuse=${encodeURIComponent(slug)}`}
+              className="btn-ghost px-4 py-2 text-sm"
+              title="以它为素材,再选一个应用进行聚变合成"
+            >
+              ⚛ 用它聚变
+            </Link>
           </div>
 
           {isMobile && (

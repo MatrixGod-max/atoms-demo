@@ -8,7 +8,13 @@ const MODEL = process.env.DEEPSEEK_MODEL || "deepseek-chat";
 
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
-import { validateHtml } from "./validate";
+import {
+  runAcceptance,
+  validateHtml,
+  type AcceptanceCase,
+  type AcceptanceOutcome,
+  type AcceptanceStep,
+} from "./validate";
 import { fetchReferences } from "./research";
 import { modelBadge, normalizeMode, stageModels, type GenerationMode } from "./models";
 import type { PipelineAttachment } from "./attachments";
@@ -31,18 +37,28 @@ export interface PmStories {
   acceptance: string[];
 }
 
+export interface FusionPlan {
+  name: string;
+  summary: string;
+  from_a: string[];
+  from_b: string[];
+  fusion: string[];
+}
+
 export type AgentEvent =
   | {
       type: "stage";
-      stage: "researcher" | "pm" | "architect" | "planner" | "engineer" | "reviewer" | "validator";
+      stage: "researcher" | "fusion" | "pm" | "architect" | "planner" | "engineer" | "reviewer" | "validator";
       status: "start" | "done";
       info?: string;
       model?: string;
     }
   | { type: "plan"; spec: AppSpec }
+  | { type: "fusion"; plan: FusionPlan }
   | { type: "pm"; stories: PmStories }
   | { type: "architect"; blueprint: string }
   | { type: "research"; brief: ResearchBrief }
+  | { type: "acceptance"; results: AcceptanceOutcome[] }
   | { type: "code_delta"; delta: string }
   | { type: "code_reset" }
   | { type: "agent_message"; content: string }
@@ -156,6 +172,68 @@ export interface PipelineInput {
   connectors?: string[];
   attachments?: PipelineAttachment[];
   mode?: GenerationMode;
+  goal?: string | null;
+  /** Element picked in the preview (指哪改哪): scope this iteration to it. */
+  target?: { selector: string; snippet: string } | null;
+  /** Persisted PM acceptance criteria — drives acceptance tests on iterations. */
+  acceptance?: string[] | null;
+  /** 聚变: the two published source apps to merge (first generation only). */
+  fusionSources?: { name: string; html: string; spec: string | null }[] | null;
+}
+
+const ACCEPTANCE_ACTIONS = ["click", "type", "assertText", "assertExists", "assertNotExists"];
+
+/** Compile PM acceptance criteria into declarative DSL test cases (data, not code). */
+async function buildAcceptanceCases(html: string, criteria: string[], model: string): Promise<AcceptanceCase[]> {
+  const raw = await chat(
+    [
+      {
+        role: "system",
+        content: `你是 Fusion 平台的验收测试智能体(QA)。给定一个单文件应用的 HTML 与它的验收标准,为每条标准编写一个可自动执行的交互测试用例。只允许以下动作:
+- {"action":"click","selector":"CSS选择器"} 点击元素
+- {"action":"type","selector":"...","text":"输入内容"} 在输入框中输入
+- {"action":"assertText","selector":"...","contains":"期望包含的文本"} 断言元素文本
+- {"action":"assertExists","selector":"..."} 断言元素存在
+- {"action":"assertNotExists","selector":"..."} 断言元素不存在
+selector 必须是该 HTML 中真实存在的选择器(优先用 id)。每条标准最多 8 步;无法用这些动作验证的标准(如纯视觉/性能类)输出空 steps。
+严格输出 JSON(无其他文字):{"cases":[{"criterion":"标准原文","steps":[...]}]},cases 与标准一一对应、顺序一致。`,
+      },
+      {
+        role: "user",
+        content: `验收标准:\n${criteria.map((c, i) => `${i + 1}. ${c}`).join("\n")}\n\n应用完整代码:\n${html.slice(0, 40_000)}`,
+      },
+    ],
+    3072,
+    0.2,
+    model
+  );
+  const parsed = JSON.parse(extractJson(raw)) as { cases?: unknown };
+  const arr = Array.isArray(parsed.cases) ? parsed.cases : [];
+  const out: AcceptanceCase[] = [];
+  for (let i = 0; i < Math.min(arr.length, criteria.length); i++) {
+    const c = arr[i] as { criterion?: unknown; steps?: unknown };
+    const steps: AcceptanceStep[] = [];
+    if (Array.isArray(c.steps)) {
+      for (const s of c.steps.slice(0, 8)) {
+        const st = s as { action?: unknown; selector?: unknown; text?: unknown; contains?: unknown };
+        if (typeof st.action !== "string" || !ACCEPTANCE_ACTIONS.includes(st.action)) continue;
+        if (typeof st.selector !== "string" || !st.selector.trim() || st.selector.length > 200) continue;
+        steps.push({
+          action: st.action as AcceptanceStep["action"],
+          selector: st.selector.trim(),
+          text: typeof st.text === "string" ? st.text.slice(0, 200) : undefined,
+          contains: typeof st.contains === "string" ? st.contains.slice(0, 200) : undefined,
+        });
+      }
+    }
+    out.push({
+      criterion: typeof c.criterion === "string" && c.criterion.trim() ? c.criterion.slice(0, 200) : criteria[i],
+      steps,
+    });
+  }
+  // Criteria the model dropped still show up — as untestable.
+  for (let i = out.length; i < criteria.length; i++) out.push({ criterion: criteria[i], steps: [] });
+  return out;
 }
 
 /** Attachment context shared by Planner and Engineer prompts. */
@@ -197,7 +275,24 @@ async function* runMockPipeline(input: PipelineInput): AsyncGenerator<AgentEvent
     };
     yield { type: "stage", stage: "researcher", status: "done", info: "mock 研究完成" };
   }
-  if (input.team) {
+  const mockFusing = !isIteration && input.fusionSources?.length === 2;
+  if (mockFusing) {
+    const [a, b] = input.fusionSources!;
+    yield { type: "stage", stage: "fusion", status: "start", model: modelBadge(sm.planner) };
+    await sleep(40);
+    yield {
+      type: "fusion",
+      plan: {
+        name: "Mock 聚变应用",
+        summary: `mock 合并 ${a.name} 与 ${b.name}`,
+        from_a: [`${a.name} 的计数`],
+        from_b: [`${b.name} 的展示`],
+        fusion: ["统一状态"],
+      },
+    };
+    yield { type: "stage", stage: "fusion", status: "done", info: "Mock 聚变应用" };
+  }
+  if (input.team && !mockFusing) {
     if (!isIteration) {
       yield { type: "stage", stage: "pm", status: "start", model: modelBadge(sm.pm) };
       await sleep(40);
@@ -212,7 +307,7 @@ async function* runMockPipeline(input: PipelineInput): AsyncGenerator<AgentEvent
     yield { type: "architect", blueprint: isIteration ? "变更蓝图:仅调整按钮区块" : "架构蓝图:标题区 + 计数区 + 按钮区" };
     yield { type: "stage", stage: "architect", status: "done", info: "蓝图就绪", model: modelBadge(sm.architect) };
   }
-  if (!isIteration && !input.team) {
+  if (!isIteration && !input.team && !mockFusing) {
     yield { type: "stage", stage: "planner", status: "start", model: modelBadge(sm.planner) };
     await sleep(50);
     const spec: AppSpec = {
@@ -234,8 +329,12 @@ async function* runMockPipeline(input: PipelineInput): AsyncGenerator<AgentEvent
   const attComment = input.attachments?.length
     ? `<!-- attachments: ${input.attachments.map((a) => a.filename).join(", ")} -->`
     : "";
+  const targetComment = input.target ? `<!-- target: ${input.target.selector} -->` : "";
+  const fusionComment = mockFusing
+    ? `<!-- fused: ${input.fusionSources!.map((s) => s.name).join("+")} -->`
+    : "";
   let html = `<!DOCTYPE html>
-<html lang="zh-CN"><head><meta charset="utf-8">${mobileMeta}${attComment}${themeComment}${connComment}<title>Mock 计数器</title>
+<html lang="zh-CN"><head><meta charset="utf-8">${mobileMeta}${attComment}${themeComment}${connComment}${targetComment}${fusionComment}<title>Mock 计数器</title>
 <style>body{font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:16px}button{font-size:20px;padding:8px 24px}</style>
 </head><body><h1 id="n">0</h1><button id="b">+1</button>
 ${broken ? "<script>throw new Error('mock runtime failure')<\/script>" : ""}
@@ -270,6 +369,25 @@ ${broken ? "<script>throw new Error('mock runtime failure')<\/script>" : ""}
     const v2 = await validateHtml(html, input.platform);
     validatorNotes = `捕获 ${v1.errors.length} 个运行时错误并修复(复验${v2.ok ? "通过" : "未过"})`;
   }
+  // Acceptance path exercises the real DSL executor against the mock app.
+  const mockCriteria = input.acceptance?.length ? input.acceptance : input.team ? ["点击后数字+1"] : [];
+  if (mockCriteria.length) {
+    const ar = await runAcceptance(html, input.platform, [
+      {
+        criterion: mockCriteria[0],
+        steps: [
+          { action: "click", selector: "#b" },
+          { action: "assertText", selector: "#n", contains: "1" },
+        ],
+      },
+    ]);
+    if (ar.skipped) {
+      validatorNotes += ";验收环境不可用,跳过";
+    } else {
+      yield { type: "acceptance", results: ar.results };
+      validatorNotes += `;验收 ${ar.results.filter((r) => r.pass).length}/${ar.results.length} 通过`;
+    }
+  }
   yield { type: "stage", stage: "validator", status: "done", info: validatorNotes };
   yield { type: "html", html, reviewNotes: `mock 评审通过;${validatorNotes}` };
   yield { type: "agent_message", content: isIteration ? "mock 迭代完成" : "「Mock 计数器」已生成" };
@@ -286,6 +404,9 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
   // ---- Stage 1: Planner (first generation only) ----
   const isMobile = input.platform === "mobile";
   const attContext = attachmentContext(input.attachments);
+  const goalContext = input.goal
+    ? `\n\n【目标】本项目的最终目标:${input.goal}。所有产出都要向该目标收敛,优先补齐目标要求的能力。`
+    : "";
   const sm = stageModels(normalizeMode(input.mode));
 
   // ---- Stage 0 (optional): Researcher ----
@@ -305,7 +426,7 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
 {"audience":"目标用户一句话","patterns":["同类产品值得借鉴的2-4个模式"],"must_have":["必备功能2-4条"],"nice_to_have":["加分功能1-3条"],"risks":["风险或易错点1-3条"],"references":["引用来源,无则空数组"]}
 语言与用户输入一致。`,
           },
-          { role: "user", content: `${input.request}${refBlock}${attContext}` },
+          { role: "user", content: `${input.request}${goalContext}${refBlock}${attContext}` },
         ],
         2048,
         0.6,
@@ -320,10 +441,44 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
     }
   }
 
+  // ---- 聚变: Fusion Analyst merges two published apps (first generation only) ----
+  let fusionPlan: FusionPlan | null = null;
+  const fusing = !isIteration && input.fusionSources?.length === 2;
+  if (fusing) {
+    const [a, b] = input.fusionSources!;
+    yield { type: "stage", stage: "fusion", status: "start", model: modelBadge(sm.planner) };
+    const raw = await chat(
+      [
+        {
+          role: "system",
+          content: `你是 Fusion 平台的聚变分析师(Fusion Analyst)。用户选择了两个已发布应用做「聚变」——合并为一个全新应用,而非简单拼接。分析两份代码的核心能力与数据模型,输出合并蓝图,严格输出 JSON(无其他文字):
+{"name":"新应用名(<=12字)","summary":"一句话定位","from_a":["保留自应用A的核心能力 2-4 条"],"from_b":["保留自应用B的核心能力 2-4 条"],"fusion":["两者结合产生的新能力或统一设计 1-3 条"]}
+语言与应用内容一致。取舍务实:只保留一次生成能落地的范围;两个应用的数据模型要设计成统一的状态结构。`,
+        },
+        {
+          role: "user",
+          content: `应用 A「${a.name}」代码(节选):\n${a.html.slice(0, 8000)}\n\n应用 B「${b.name}」代码(节选):\n${b.html.slice(0, 8000)}\n\n用户需求:${input.request}`,
+        },
+      ],
+      2048,
+      0.4,
+      sm.planner
+    );
+    fusionPlan = JSON.parse(extractJson(raw)) as FusionPlan;
+    yield { type: "fusion", plan: fusionPlan };
+    yield { type: "stage", stage: "fusion", status: "done", info: fusionPlan.name };
+    spec = {
+      name: fusionPlan.name,
+      summary: fusionPlan.summary,
+      features: [...fusionPlan.from_a.slice(0, 2), ...fusionPlan.from_b.slice(0, 2), ...fusionPlan.fusion.slice(0, 1)],
+      design: "",
+    };
+  }
+
   // ---- Team mode: PM -> Architect (replaces the single Planner on fresh builds) ----
   let pmOut: PmStories | null = null;
   let blueprint: string | null = null;
-  if (input.team) {
+  if (input.team && !fusing) {
     if (!isIteration) {
       yield { type: "stage", stage: "pm", status: "start", model: modelBadge(sm.pm) };
       const rawPm = await chat(
@@ -336,7 +491,7 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
           },
           {
             role: "user",
-            content: `${input.request}${brief ? `\n\n研究员简报:\n${JSON.stringify(brief, null, 2)}` : ""}${attContext}`,
+            content: `${input.request}${goalContext}${brief ? `\n\n研究员简报:\n${JSON.stringify(brief, null, 2)}` : ""}${attContext}`,
           },
         ],
         2048,
@@ -362,8 +517,8 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
         {
           role: "user",
           content: isIteration
-            ? `现有应用代码(节选前 6000 字):\n${(input.currentHtml ?? "").slice(0, 6000)}\n\n修改需求: ${input.request}${attContext}`
-            : `需求:${input.request}\n\nPM 需求单:\n${JSON.stringify(pmOut, null, 2)}${attContext}`,
+            ? `现有应用代码(节选前 6000 字):\n${(input.currentHtml ?? "").slice(0, 6000)}\n\n修改需求: ${input.request}${goalContext}${attContext}`
+            : `需求:${input.request}${goalContext}\n\nPM 需求单:\n${JSON.stringify(pmOut, null, 2)}${attContext}`,
         },
       ],
       2048,
@@ -376,7 +531,7 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
     if (spec) spec.design = blueprint.split("\n")[0].slice(0, 60);
   }
 
-  if (!isIteration && !input.team) {
+  if (!isIteration && !input.team && !fusing) {
     yield { type: "stage", stage: "planner", status: "start", model: modelBadge(sm.planner) };
     const raw = await chat(
       [
@@ -392,7 +547,7 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
         },
         {
           role: "user",
-          content: `${input.request}${brief ? `\n\n研究员简报(请充分吸收):\n${JSON.stringify(brief, null, 2)}` : ""}${attContext}`,
+          content: `${input.request}${goalContext}${brief ? `\n\n研究员简报(请充分吸收):\n${JSON.stringify(brief, null, 2)}` : ""}${attContext}`,
         },
       ],
       1024,
@@ -427,18 +582,29 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
       .slice(-6)
       .map((m) => `${m.role === "user" ? "用户" : "智能体"}: ${m.content}`)
       .join("\n");
+    const targetContext = input.target
+      ? `\n\n【目标元素】用户在预览中点选了元素 \`${input.target.selector}\`${
+          input.target.snippet ? `,其当前代码片段:\n${input.target.snippet}` : ""
+        }\n本次修改必须聚焦该元素及其必要的关联逻辑(样式/事件/状态),页面其余部分保持原样,不做无关改动。`
+      : "";
     engineerMessages.push({
       role: "user",
       content: `这是当前应用的完整代码:\n\n${input.currentHtml}\n\n最近的对话:\n${recent}\n\n用户的新需求: ${input.request}${
         blueprint ? `\n\n架构师的变更蓝图(请遵循):\n${blueprint}` : ""
-      }${attContext}\n\n请在保留现有功能与风格的基础上完成修改,输出修改后的完整 HTML 文件。`,
+      }${targetContext}${attContext}\n\n请在保留现有功能与风格的基础上完成修改,输出修改后的完整 HTML 文件。`,
+    });
+  } else if (fusionPlan && input.fusionSources?.length === 2) {
+    const [a, b] = input.fusionSources;
+    engineerMessages.push({
+      role: "user",
+      content: `聚变任务:把两个现有应用融合为一个全新的单文件应用。\n\n【应用 A「${a.name}」完整代码】\n${a.html.slice(0, 12_000)}\n\n【应用 B「${b.name}」完整代码】\n${b.html.slice(0, 12_000)}\n\n【聚变蓝图(请遵循)】\n${JSON.stringify(fusionPlan, null, 2)}\n\n用户需求:${input.request}${goalContext}${attContext}\n\n要求:产出的是重新设计的统一应用,不是两份代码的拼接 —— 统一信息架构、状态结构与视觉体系,融合两者核心能力。输出完整 HTML 文件。`,
     });
   } else {
     engineerMessages.push({
       role: "user",
       content: pmOut
-        ? `PM 需求单:\n${JSON.stringify(pmOut, null, 2)}\n\n架构师蓝图(请遵循):\n${blueprint}\n\n用户原始需求: ${input.request}${attContext}\n\n请实现这个应用。`
-        : `产品规格:\n${JSON.stringify(spec, null, 2)}\n\n用户原始需求: ${input.request}${attContext}\n\n请实现这个应用。`,
+        ? `PM 需求单:\n${JSON.stringify(pmOut, null, 2)}\n\n架构师蓝图(请遵循):\n${blueprint}\n\n用户原始需求: ${input.request}${goalContext}${attContext}\n\n请实现这个应用。`
+        : `产品规格:\n${JSON.stringify(spec, null, 2)}\n\n用户原始需求: ${input.request}${goalContext}${attContext}\n\n请实现这个应用。`,
     });
   }
 
@@ -539,6 +705,79 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
       validatorNotes = "修复产出无效,保留原产物";
     }
   }
+
+  // ---- Stage 4.5: acceptance-driven validation (PM 验收标准 -> 真实交互测试) ----
+  const criteria = (pmOut?.acceptance ?? input.acceptance ?? [])
+    .filter((s): s is string => typeof s === "string" && !!s.trim())
+    .slice(0, 6);
+  if (criteria.length) {
+    let acceptanceNote: string;
+    try {
+      const cases = await buildAcceptanceCases(html, criteria, sm.reviewer);
+      const first = await runAcceptance(html, input.platform, cases);
+      if (first.skipped) {
+        acceptanceNote = "验收环境不可用,跳过";
+      } else {
+        let results = first.results;
+        let repaired = false;
+        const failed = results.filter((r) => !r.pass && !r.skipped);
+        if (failed.length) {
+          // One repair round driven by the failing criteria, then re-test with the same cases.
+          let fixed = "";
+          yield { type: "code_reset" };
+          for await (const delta of chatStream(
+            [
+              {
+                role: "system",
+                content: `你是 Quark 平台的工程师智能体(Engineer)。\n${ENGINEER_RULES}${isMobile ? ENGINEER_RULES_MOBILE_EXTRA : ""}${
+                  input.theme ? `\n【主题规范】视觉主题固定为「${input.theme}」,修复时保持不变。` : ""
+                }`,
+              },
+              {
+                role: "user",
+                content: `以下单文件应用在真实浏览器的自动化验收测试中未通过部分验收标准。\n\n未通过项:\n${failed
+                  .map((f) => `- ${f.criterion}(${f.note ?? "未通过"})`)
+                  .join("\n")}\n\n当前代码:\n\n${html}\n\n请修改代码使这些验收标准通过。保持已通过的功能、现有元素的 id/class 与视觉风格不变,输出修复后的完整 HTML 文件。`,
+              },
+            ],
+            8192,
+            0.2,
+            sm.engineer
+          )) {
+            fixed += delta;
+            yield { type: "code_delta", delta };
+          }
+          fixed = stripFences(fixed);
+          if (/^<!DOCTYPE html>/i.test(fixed) && fixed.length > 500) {
+            const rv = await validateHtml(fixed, input.platform);
+            if (rv.skipped || rv.ok) {
+              const rerun = await runAcceptance(fixed, input.platform, cases);
+              const failCount = (rs: AcceptanceOutcome[]) => rs.filter((r) => !r.pass && !r.skipped).length;
+              if (!rerun.skipped && failCount(rerun.results) < failed.length) {
+                html = fixed;
+                results = rerun.results;
+                repaired = true;
+              }
+            }
+          }
+          if (!repaired) {
+            yield { type: "code_reset" };
+            yield { type: "code_delta", delta: html };
+          }
+        }
+        const skippedN = results.filter((r) => r.skipped).length;
+        const passN = results.filter((r) => r.pass && !r.skipped).length;
+        acceptanceNote = `验收 ${passN}/${results.length - skippedN} 通过${skippedN ? `(${skippedN} 项无法自动验证)` : ""}${
+          repaired ? ",含一轮修复" : ""
+        }`;
+        yield { type: "acceptance", results };
+      }
+    } catch {
+      acceptanceNote = "验收测试异常,跳过(不影响产物)";
+    }
+    validatorNotes = `${validatorNotes};${acceptanceNote}`;
+  }
+
   yield { type: "stage", stage: "validator", status: "done", info: validatorNotes };
   reviewNotes = reviewNotes ? `${reviewNotes};${validatorNotes}` : validatorNotes;
 
@@ -548,5 +787,62 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
     content: isIteration
       ? `已完成本次修改:${input.request.slice(0, 80)}${reviewNotes ? `\n评审:${reviewNotes}` : ""}`
       : `「${spec?.name}」已生成:${spec?.summary}\n评审:${reviewNotes}`,
+  };
+}
+
+export interface GoalEvalInput {
+  goal: string;
+  html: string;
+  round: number;
+  maxRounds: number;
+  mode?: GenerationMode;
+}
+
+export interface GoalEvalResult {
+  met: boolean;
+  score: number;
+  gaps: string[];
+  next_request: string;
+}
+
+/** Goal-mode round judge: does the current app satisfy the project goal? */
+export async function runGoalEval(input: GoalEvalInput): Promise<GoalEvalResult> {
+  if (process.env.AGENT_MOCK === "1") {
+    await new Promise((r) => setTimeout(r, 30));
+    const met = !input.goal.includes("MOCK_NEVER_MET") && input.round >= 2;
+    return met
+      ? { met: true, score: 95, gaps: [], next_request: "" }
+      : {
+          met: false,
+          score: 40,
+          gaps: ["mock 缺口:目标尚未覆盖"],
+          next_request: `继续补齐目标缺口(mock 第 ${input.round} 轮)`,
+        };
+  }
+  const sm = stageModels(normalizeMode(input.mode));
+  const raw = await chat(
+    [
+      {
+        role: "system",
+        content: `你是 Fusion 平台的目标评估智能体(Goal Judge)。用户为项目设定了一个目标,平台正在自动迭代构建;你负责判断当前应用是否已达成目标。判定要务实:目标要点已覆盖、核心功能可用即达标,不追求完美。严格输出 JSON(无其他文字):
+{"met":true|false,"score":0-100 的完成度整数,"gaps":["未达标的具体缺口,达标时为空数组"],"next_request":"一段可直接交给工程师执行的下一轮迭代指令,达标时为空字符串"}
+next_request 必须具体、可落地(改哪些区块/补什么功能),语言与目标一致。`,
+      },
+      {
+        role: "user",
+        content: `【目标】${input.goal}\n\n【进度】第 ${input.round}/${input.maxRounds} 轮\n\n【当前应用完整代码】\n${input.html.slice(0, 60_000)}`,
+      },
+    ],
+    2048,
+    0.2,
+    sm.reviewer
+  );
+  const parsed = JSON.parse(extractJson(raw)) as Partial<GoalEvalResult>;
+  if (typeof parsed.met !== "boolean") throw new Error("目标评估输出无效");
+  return {
+    met: parsed.met,
+    score: Math.max(0, Math.min(100, Math.round(Number(parsed.score) || 0))),
+    gaps: Array.isArray(parsed.gaps) ? parsed.gaps.filter((g) => typeof g === "string").slice(0, 8) : [],
+    next_request: typeof parsed.next_request === "string" ? parsed.next_request : "",
   };
 }

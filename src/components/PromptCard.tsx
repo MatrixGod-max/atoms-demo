@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { useSpeech } from "@/lib/useSpeech";
-import { THEME_PRESETS, encodeFileBase64, inferMime, launchProject, precheckFile } from "@/lib/launch";
+import { CLIENT_MAX_ATTACHMENTS, THEME_PRESETS, encodeFileBase64, inferMime, launchProject, precheckFile } from "@/lib/launch";
 
 const EXAMPLES = ["一个番茄钟专注应用", "极简记账本,支持分类统计", "习惯打卡日历", "团队站会抽签转盘"];
 
@@ -50,6 +50,8 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
   const [modeOpen, setModeOpen] = useState(false);
   const speech = useSpeech((text) => setPrompt((v) => (v ? `${v}${text}` : text)));
   const [teamMode, setTeamMode] = useState(false); // visual only
+  const [goalMode, setGoalMode] = useState(false);
+  const [goalText, setGoalText] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [plusOpen, setPlusOpen] = useState(false);
   const [connectorsOpen, setConnectorsOpen] = useState(false);
@@ -58,6 +60,7 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   function closeMenus() {
     setPlusOpen(false);
@@ -66,18 +69,29 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
     setBuildOpen(false);
   }
 
-  function addFiles(list: FileList | null) {
+  /** Folder picks contain arbitrary trees: skip ineligible files instead of aborting. */
+  function addFiles(list: FileList | null, fromFolder = false) {
     if (!list) return;
     setError("");
     const next = [...files];
+    let skipped = 0;
     for (const f of Array.from(list)) {
       const bad = precheckFile(f, next.length);
       if (bad) {
-        setError(`${f.name}:${bad}`);
-        break;
+        if (!fromFolder) {
+          setError(`${f.name}:${bad}`);
+          break;
+        }
+        if (next.length >= CLIENT_MAX_ATTACHMENTS) {
+          setError(`每个项目最多 ${CLIENT_MAX_ATTACHMENTS} 个附件,文件夹内其余文件已忽略`);
+          break;
+        }
+        skipped++;
+        continue;
       }
       next.push(f);
     }
+    if (fromFolder && skipped) setError(`已跳过文件夹内 ${skipped} 个不支持或超限的文件`);
     setFiles(next);
   }
 
@@ -86,13 +100,14 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
     if (!trimmed || busy) return;
     setError("");
     closeMenus();
+    const goal = goalMode ? goalText.trim() || trimmed : null;
     if (!loggedIn) {
-      sessionStorage.setItem("quark_boot", JSON.stringify({ prompt: trimmed, platform, research, team: teamMode, theme, mode: genMode, connectors }));
+      sessionStorage.setItem("quark_boot", JSON.stringify({ prompt: trimmed, platform, research, team: teamMode, theme, mode: genMode, connectors, goal }));
       router.push("/register?next=launch");
       return;
     }
     setBusy(true);
-    const result = await launchProject(trimmed, platform, { research, team: teamMode, theme, mode: genMode, connectors });
+    const result = await launchProject(trimmed, platform, { research, team: teamMode, theme, mode: genMode, connectors, goal });
     if ("error" in result) {
       setError(result.error);
       setBusy(false);
@@ -105,7 +120,7 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
         const res = await fetch(`/api/projects/${result.id}/attachments`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ filename: f.name, mime: inferMime(f), dataBase64: await encodeFileBase64(f) }),
+          body: JSON.stringify({ filename: f.webkitRelativePath || f.name, mime: inferMime(f), dataBase64: await encodeFileBase64(f) }),
         });
         if (!res.ok) failed.push(f.name);
       } catch {
@@ -163,7 +178,17 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
                     onClick={() => loggedIn && fileInputRef.current?.click()}
                   >
                     <span className="text-base">📎</span>
-                    <span className="flex-1 text-left">附件</span>
+                    <span className="flex-1 text-left">上传文件</span>
+                    <span className="text-muted">›</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`${menuItem} ${!loggedIn ? "opacity-40 cursor-not-allowed" : ""}`}
+                    title={loggedIn ? "选择整个文件夹,自动收取其中支持的文本与图片文件" : "登录后可添加附件"}
+                    onClick={() => loggedIn && folderInputRef.current?.click()}
+                  >
+                    <span className="text-base">📁</span>
+                    <span className="flex-1 text-left">上传文件夹</span>
                     <span className="text-muted">›</span>
                   </button>
                   <button
@@ -208,6 +233,11 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
                     <span className="text-base">🔬</span>
                     <span className="flex-1 text-left">深度研究</span>
                     <Toggle on={research} onClick={() => setResearch(!research)} />
+                  </div>
+                  <div className={menuItem} title="设定目标后自动持续迭代,直到评估达标或轮数上限">
+                    <span className="text-base">🎯</span>
+                    <span className="flex-1 text-left">目标模式</span>
+                    <Toggle on={goalMode} onClick={() => setGoalMode(!goalMode)} />
                   </div>
                   <div className={`${menuItem} opacity-40 cursor-not-allowed`} title="即将推出">
                     <span className="text-base">🏆</span>
@@ -367,6 +397,19 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
         onChange={(e) => {
           addFiles(e.target.files);
           e.target.value = "";
+          closeMenus();
+        }}
+      />
+      <input
+        ref={folderInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        {...({ webkitdirectory: "" } as React.InputHTMLAttributes<HTMLInputElement>)}
+        onChange={(e) => {
+          addFiles(e.target.files, true);
+          e.target.value = "";
+          closeMenus();
         }}
       />
 
@@ -390,10 +433,21 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
         </div>
       )}
 
-      {(research || theme) && (
+      {goalMode && (
+        <input
+          className="input w-full px-3 py-2 text-sm mt-2.5"
+          placeholder="目标(达标标准),留空则以上方描述为目标"
+          value={goalText}
+          maxLength={500}
+          onChange={(e) => setGoalText(e.target.value)}
+        />
+      )}
+
+      {(research || theme || goalMode) && (
         <div className="flex flex-wrap gap-2 mt-2.5 text-[11px] text-muted">
           {research && <span className="px-2 py-1 rounded-md bg-accent-soft text-accent">🔬 深度研究已开启</span>}
           {theme && <span className="px-2 py-1 rounded-md bg-accent-soft text-accent">🎨 主题:{theme}</span>}
+          {goalMode && <span className="px-2 py-1 rounded-md bg-accent-soft text-accent">🎯 目标模式已开启</span>}
         </div>
       )}
 

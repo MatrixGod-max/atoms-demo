@@ -31,6 +31,7 @@ export interface LaunchOptions {
   theme?: string | null;
   mode?: "fast" | "mixed" | "deep";
   connectors?: string[];
+  goal?: string | null;
 }
 
 /** Base64-encodes a File without blowing the call stack on large buffers. */
@@ -56,13 +57,13 @@ export async function launchProject(
   const res = await fetch("/api/projects", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ prompt, platform, theme: opts.theme ?? null, connectors: opts.connectors ?? [] }),
+    body: JSON.stringify({ prompt, platform, theme: opts.theme ?? null, connectors: opts.connectors ?? [], goal: opts.goal ?? null }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return { error: data.error || `创建失败 (${res.status})` };
   sessionStorage.setItem(
     `quark_pending_${data.id}`,
-    JSON.stringify({ prompt, research: !!opts.research, team: !!opts.team, mode: opts.mode ?? "fast" })
+    JSON.stringify({ prompt, research: !!opts.research, team: !!opts.team, mode: opts.mode ?? "fast", goal: !!opts.goal })
   );
   return { id: data.id };
 }

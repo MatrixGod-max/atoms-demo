@@ -1,17 +1,18 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { galleryApps, appUrl } from "@/lib/gallery";
-import AppCard from "@/components/AppCard";
+import DiscoverGrid from "@/components/DiscoverGrid";
 import TemplateCard, { type TemplateMeta } from "@/components/TemplateCard";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = { title: "资源 — Fusion" };
 
-export default async function Resources({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
-  const { tab } = await searchParams;
+export default async function Resources({ searchParams }: { searchParams: Promise<{ tab?: string; fuse?: string }> }) {
+  const { tab, fuse } = await searchParams;
   const active = tab === "templates" ? "templates" : "discover";
   const apps = galleryApps(12);
+  const urls = Object.fromEntries(apps.map((a) => [a.slug, appUrl(a.slug)]));
   const templates = db
     .prepare("SELECT id, name, category, platform, description FROM templates ORDER BY created_at")
     .all()
@@ -49,11 +50,7 @@ export default async function Resources({ searchParams }: { searchParams: Promis
               还没有发布的作品。<Link href="/" className="text-accent hover:underline">去生成第一个应用</Link>
             </div>
           ) : (
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {apps.map((app) => (
-                <AppCard key={app.slug} app={app} url={appUrl(app.slug)} />
-              ))}
-            </div>
+            <DiscoverGrid apps={apps} urls={urls} preselect={fuse} />
           )
         ) : (
           <>

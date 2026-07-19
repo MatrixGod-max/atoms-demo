@@ -8,6 +8,11 @@ export default defineConfig({
   test: {
     include: ["tests/**/*.test.ts"],
     fileParallelism: false,
+    // One fork for everything: parallel collector forks re-import db/jobs and
+    // race the shared .test-data SQLite (startup cleanup + WAL contention).
+    // (vitest 4 removed poolOptions.forks.singleFork; sequential files + no
+    // isolation reuses the same fork end to end.)
+    isolate: false,
     env: {
       DATA_DIR: path.resolve(__dirname, ".test-data"),
       AGENT_MOCK: "1",

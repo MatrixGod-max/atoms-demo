@@ -9,6 +9,13 @@ export interface ProjectRow {
   published_version_id: string | null;
   created_at: number;
   updated_at: number;
+  goal: string | null;
+  goal_active: number;
+  goal_round: number;
+  goal_rounds: number;
+  goal_status: string | null;
+  acceptance: string | null;
+  fused_from: string | null;
 }
 
 export function ownedProject(userId: string, projectId: string): ProjectRow | undefined {

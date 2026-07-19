@@ -55,6 +55,10 @@ function AuthFormInner({ mode }: { mode: "login" | "register" }) {
         return;
       }
     }
+    if (params.get("next") === "fuse" && params.get("a") && params.get("b")) {
+      router.push(`/fuse?a=${encodeURIComponent(params.get("a")!)}&b=${encodeURIComponent(params.get("b")!)}`);
+      return;
+    }
     if (params.get("next") === "launch") {
       const boot = sessionStorage.getItem("quark_boot");
       if (boot) {
@@ -66,6 +70,7 @@ function AuthFormInner({ mode }: { mode: "login" | "register" }) {
         let theme: string | null = null;
         let connectors: string[] = [];
         let mode: "fast" | "mixed" | "deep" = "fast";
+        let goal: string | null = null;
         try {
           const parsed = JSON.parse(boot);
           if (parsed.prompt) {
@@ -76,11 +81,12 @@ function AuthFormInner({ mode }: { mode: "login" | "register" }) {
             theme = typeof parsed.theme === "string" ? parsed.theme : null;
             if (Array.isArray(parsed.connectors)) connectors = parsed.connectors;
             if (parsed.mode === "mixed" || parsed.mode === "deep") mode = parsed.mode;
+            if (typeof parsed.goal === "string" && parsed.goal.trim()) goal = parsed.goal;
           }
         } catch {
           // legacy plain-string boot value
         }
-        const result = await launchProject(prompt, platform, { research, team, theme, connectors, mode });
+        const result = await launchProject(prompt, platform, { research, team, theme, connectors, mode, goal });
         if ("id" in result) {
           router.push(`/project/${result.id}`);
           return;

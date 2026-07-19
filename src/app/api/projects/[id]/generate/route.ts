@@ -20,10 +20,20 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const project = ownedProject(user.id, id);
   if (!project) return NextResponse.json({ error: "项目不存在" }, { status: 404 });
 
-  const { prompt, research, team, mode } = await req.json().catch(() => ({}));
+  const { prompt, research, team, mode, target, goalLoop } = await req.json().catch(() => ({}));
   if (typeof prompt !== "string" || !prompt.trim()) {
     return NextResponse.json({ error: "请输入需求" }, { status: 400 });
   }
+  if (goalLoop === true && !project.goal) {
+    return NextResponse.json({ error: "请先为项目设置目标" }, { status: 400 });
+  }
+  const pickTarget =
+    target && typeof target.selector === "string" && target.selector.trim()
+      ? {
+          selector: target.selector.trim().slice(0, 300),
+          snippet: typeof target.snippet === "string" ? target.snippet.slice(0, 1000) : "",
+        }
+      : null;
 
   const rl = rateLimit(`gen:${user.id}`, 3, 10 * 60_000);
   if (!rl.ok) {
@@ -41,7 +51,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     return NextResponse.json({ error: `24 小时生成额度(${DAILY_QUOTA} 次)已用完,明天再来吧` }, { status: 429 });
   }
 
-  const cost = generationCost(normalizeMode(mode), research === true, team === true);
+  // 聚变首次生成走双源合并流水线,收 +2 附加费。
+  const isFusion = !!project.fused_from && !project.current_version_id;
+  const cost = generationCost(normalizeMode(mode), research === true, team === true, isFusion);
   if (!charge(user.id, cost, `generate:${normalizeMode(mode)}`)) {
     return NextResponse.json(
       { error: `积分不足(本次需 ${cost},余额 ${balance(user.id)})。点击顶部横幅领取免费积分。` },
@@ -49,7 +61,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     );
   }
   try {
-    const { jobId, position } = jobRunner.start(id, user.id, prompt.trim(), research === true, normalizeMode(mode), team === true, cost);
+    const { jobId, position } = jobRunner.start(id, user.id, prompt.trim(), research === true, normalizeMode(mode), team === true, cost, pickTarget);
+    if (goalLoop === true) {
+      // Arm only after a successful start; a 409/throw leaves the flag untouched.
+      db.prepare("UPDATE projects SET goal_active = 1, goal_round = 0, goal_status = 'running' WHERE id = ?").run(id);
+    }
     return NextResponse.json({ jobId, position, cost, credits: balance(user.id) });
   } catch (err) {
     const e = err as Error & { code?: number; jobId?: string };

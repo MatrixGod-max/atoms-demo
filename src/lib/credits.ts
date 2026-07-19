@@ -6,9 +6,9 @@ export const SIGNUP_BONUS = 20;
 export const BANNER_BONUS = 26;
 
 /** Credit price of one generation, Atoms-style: heavier thinking costs more. */
-export function generationCost(mode: GenerationMode, research: boolean, team: boolean): number {
+export function generationCost(mode: GenerationMode, research: boolean, team: boolean, fusion = false): number {
   const base = mode === "deep" ? 5 : mode === "mixed" ? 3 : 1;
-  return base + (research ? 1 : 0) + (team ? 1 : 0);
+  return base + (research ? 1 : 0) + (team ? 1 : 0) + (fusion ? 2 : 0);
 }
 
 export function balance(userId: string): number {

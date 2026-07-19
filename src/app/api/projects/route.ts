@@ -20,10 +20,11 @@ export async function POST(req: Request) {
   if (!user) return NextResponse.json({ error: "未登录" }, { status: 401 });
   const blocked = demoGuard(user);
   if (blocked) return NextResponse.json({ error: blocked }, { status: 403 });
-  const { prompt, remixSlug, templateId, platform, theme, connectors } = await req.json().catch(() => ({}));
+  const { prompt, remixSlug, templateId, platform, theme, connectors, goal, fuseSlugs } = await req.json().catch(() => ({}));
   const chosenConnectors = Array.isArray(connectors) && connectors.length ? JSON.stringify(connectors.slice(0, 5)) : null;
   const chosenTheme = typeof theme === "string" && theme.trim() ? theme.trim().slice(0, 20) : null;
   const chosenPlatform = platform === "mobile" ? "mobile" : "web";
+  const chosenGoal = typeof goal === "string" && goal.trim() ? goal.trim().slice(0, 500) : null;
 
   // Start from a curated template (v1 = the template HTML).
   if (typeof templateId === "string" && templateId) {
@@ -48,6 +49,34 @@ export async function POST(req: Request) {
       t
     );
     return NextResponse.json({ id, fromTemplate: true });
+  }
+
+  // 聚变: merge two published apps into one brand-new project. No v1 here —
+  // the first generation runs the Fusion Analyst + Engineer over both sources.
+  if (Array.isArray(fuseSlugs)) {
+    const slugs = fuseSlugs.filter((s: unknown): s is string => typeof s === "string" && !!s);
+    if (slugs.length !== 2 || slugs[0] === slugs[1]) {
+      return NextResponse.json({ error: "聚变需要选择两个不同的已发布应用" }, { status: 400 });
+    }
+    const pick = db.prepare(
+      `SELECT p.slug, p.name, p.platform FROM projects p
+       WHERE p.slug = ? AND p.published_version_id IS NOT NULL`
+    );
+    const sources = slugs.map((s: string) => pick.get(s) as { slug: string; name: string; platform: string } | undefined);
+    if (sources.some((s) => !s)) return NextResponse.json({ error: "源应用不存在或未发布" }, { status: 404 });
+    const [a, b] = sources as { slug: string; name: string; platform: string }[];
+    const id = newId("p");
+    const t = now();
+    db.prepare(
+      "INSERT INTO projects (id, user_id, name, platform, fused_from, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).run(id, user.id, `聚变 · ${a.name} × ${b.name}`.slice(0, 40), a.platform, JSON.stringify([{ slug: a.slug, name: a.name }, { slug: b.slug, name: b.name }]), t, t);
+    db.prepare("INSERT INTO messages (id, project_id, role, content, created_at) VALUES (?, ?, 'agent', ?, ?)").run(
+      newId("m"),
+      id,
+      `⚛ 已创建聚变项目:「${a.name}」×「${b.name}」。首次生成将由聚变分析师拆解两者能力并合并为一个全新应用(消耗额外 2 积分)。`,
+      t
+    );
+    return NextResponse.json({ id, fused: true, sources: [a.name, b.name] });
   }
 
   // Fork a published app into a new project of your own (v1 = its published HTML).
@@ -84,7 +113,7 @@ export async function POST(req: Request) {
   const id = newId("p");
   const t = now();
   db.prepare(
-    "INSERT INTO projects (id, user_id, name, platform, theme, connectors, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-  ).run(id, user.id, prompt.trim().slice(0, 30), chosenPlatform, chosenTheme, chosenConnectors, t, t);
+    "INSERT INTO projects (id, user_id, name, platform, theme, connectors, goal, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(id, user.id, prompt.trim().slice(0, 30), chosenPlatform, chosenTheme, chosenConnectors, chosenGoal, t, t);
   return NextResponse.json({ id, prompt: prompt.trim() });
 }

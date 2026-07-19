@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { THEME_PRESETS } from "@/lib/launch";
+import { THEME_PRESETS, precheckFile } from "@/lib/launch";
+import { INSPECTOR_SCRIPT } from "@/lib/inspector";
 import { useSpeech } from "@/lib/useSpeech";
 
 interface Message {
@@ -32,6 +33,11 @@ interface ProjectDetail {
     theme: string | null;
     connectors: string | null;
     domain_name: string | null;
+    goal: string | null;
+    goal_active: number;
+    goal_round: number;
+    goal_rounds: number;
+    goal_status: string | null;
   };
   messages: Message[];
   versions: Version[];
@@ -65,6 +71,15 @@ interface AttachmentMeta {
   size: number;
 }
 
+interface AppReport {
+  id: string;
+  kind: "feedback" | "error";
+  content: string;
+  status: "new" | "handled" | "dismissed";
+  artifact_seq: number | null;
+  created_at: number;
+}
+
 interface Spec {
   name: string;
   summary: string;
@@ -72,11 +87,12 @@ interface Spec {
   design: string;
 }
 
-type StageName = "researcher" | "pm" | "architect" | "planner" | "engineer" | "reviewer" | "validator";
+type StageName = "researcher" | "fusion" | "pm" | "architect" | "planner" | "engineer" | "reviewer" | "validator";
 type StageState = "idle" | "active" | "done";
 
 const STAGE_LABELS: Record<StageName, string> = {
   researcher: "Researcher · 研究",
+  fusion: "Fusion · 聚变分析",
   pm: "PM · 产品",
   architect: "Architect · 架构",
   planner: "Planner · 规划",
@@ -87,6 +103,7 @@ const STAGE_LABELS: Record<StageName, string> = {
 
 const IDLE_STAGES: Record<StageName, { state: StageState; info?: string; model?: string }> = {
   researcher: { state: "idle" },
+  fusion: { state: "idle" },
   pm: { state: "idle" },
   architect: { state: "idle" },
   planner: { state: "idle" },
@@ -130,11 +147,21 @@ export default function Builder({ projectId }: { projectId: string }) {
   const speech = useSpeech((text) => setInput((v) => (v ? `${v}${text}` : text)));
   const [genMode, setGenMode] = useState<"fast" | "mixed" | "deep">("fast");
   const [previewReady, setPreviewReady] = useState(false);
+  const [pickMode, setPickMode] = useState(false);
+  const [pickTarget, setPickTarget] = useState<{ selector: string; snippet: string; label: string } | null>(null);
+  const [reports, setReports] = useState<AppReport[]>([]);
+  const [reportsOpen, setReportsOpen] = useState(false);
+  const [reportSel, setReportSel] = useState<Set<string>>(new Set());
   const [themeOpen, setThemeOpen] = useState(false);
+  const [goalOpen, setGoalOpen] = useState(false);
+  const [goalDraft, setGoalDraft] = useState("");
+  const [goalRoundsDraft, setGoalRoundsDraft] = useState(5);
+  const [goalRound, setGoalRound] = useState<number | null>(null);
   const [deployOpen, setDeployOpen] = useState(false);
   const [deployBusy, setDeployBusy] = useState("");
   const [netlifyToken, setNetlifyToken] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const codeRef = useRef<HTMLPreElement>(null);
@@ -167,19 +194,20 @@ export default function Builder({ projectId }: { projectId: string }) {
     setStages(IDLE_STAGES);
   }, []);
 
-  /** One pass over the job SSE stream. Returns true when a terminal marker was seen. */
+  /** One pass over the job SSE stream. Reports the terminal marker and any chained goal-mode job. */
   const streamOnce = useCallback(
-    async (jobId: string): Promise<boolean> => {
+    async (jobId: string): Promise<{ terminal: boolean; nextJobId: string | null }> => {
       const res = await fetch(`/api/jobs/${jobId}/stream`);
       if (res.status === 401) {
         location.href = "/login";
-        return true;
+        return { terminal: true, nextJobId: null };
       }
       if (!res.ok || !res.body) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || `请求失败 (${res.status})`);
       }
       let sawTerminal = false;
+      let nextJobId: string | null = null;
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buf = "";
@@ -240,6 +268,18 @@ export default function Builder({ projectId }: { projectId: string }) {
                 { id: `tmp_ar_${Date.now()}`, role: "agent", content: JSON.stringify(event.blueprint), meta: "architect" },
               ]);
               break;
+            case "acceptance":
+              setMessages((m) => [
+                ...m,
+                { id: `tmp_ac_${Date.now()}`, role: "agent", content: JSON.stringify(event.results), meta: "acceptance" },
+              ]);
+              break;
+            case "fusion":
+              setMessages((m) => [
+                ...m,
+                { id: `tmp_fu_${Date.now()}`, role: "agent", content: JSON.stringify(event.plan), meta: "fusion" },
+              ]);
+              break;
             case "code_delta":
               setStreamCode((c) => c + event.delta);
               break;
@@ -249,27 +289,52 @@ export default function Builder({ projectId }: { projectId: string }) {
             case "agent_message":
               setMessages((m) => [...m, { id: `tmp_a_${Date.now()}`, role: "agent", content: event.content }]);
               break;
+            case "goal_eval":
+              setGoalRound(event.round);
+              setMessages((m) => [
+                ...m,
+                {
+                  id: `tmp_ge_${Date.now()}`,
+                  role: "agent",
+                  content: JSON.stringify({ ...event.result, round: event.round, maxRounds: event.maxRounds }),
+                  meta: "goal_eval",
+                },
+              ]);
+              break;
+            case "goal_next":
+              nextJobId = event.jobId;
+              setGoalRound(event.round);
+              setMessages((m) => [...m, { id: `tmp_ga_${Date.now()}`, role: "user", content: event.prompt, meta: "goal_auto" }]);
+              break;
             case "error":
               pushError(`生成失败:${event.message}`);
               break;
           }
         }
       }
-      return sawTerminal;
+      return { terminal: sawTerminal, nextJobId };
     },
     [pushError]
   );
 
-  /** Attach to a job with automatic reconnection while the job is still alive. */
+  /** Attach to a job (following goal-mode chained rounds) with automatic reconnection. */
   const attachJob = useCallback(
     async (jobId: string) => {
       setGenerating(true);
       try {
         let attempts = 0;
+        let currentJobId = jobId;
         while (true) {
           try {
-            const terminal = await streamOnce(jobId);
-            if (terminal) break;
+            const { terminal, nextJobId } = await streamOnce(currentJobId);
+            if (terminal) {
+              if (!nextJobId) break;
+              // Goal mode chained the next auto round: follow it without leaving the generating state.
+              currentJobId = nextJobId;
+              attempts = 0;
+              resetRunState();
+              continue;
+            }
             // Stream closed without a terminal marker (proxy timeout / network blip).
             throw new Error("stream dropped");
           } catch (err) {
@@ -284,7 +349,8 @@ export default function Builder({ projectId }: { projectId: string }) {
             }
             const d = res.ok ? ((await res.json()) as ProjectDetail) : null;
             setReconnecting(false);
-            if (!d?.activeJob || d.activeJob.id !== jobId) break; // job finished while we were away
+            if (!d?.activeJob) break; // job finished while we were away
+            currentJobId = d.activeJob.id; // goal chains may have moved on to a newer job
             resetRunState(); // replay will rebuild the timeline and code
           }
         }
@@ -306,34 +372,51 @@ export default function Builder({ projectId }: { projectId: string }) {
   );
 
   const generate = useCallback(
-    async (prompt: string, researchOverride?: boolean, teamOverride?: boolean, modeOverride?: "fast" | "mixed" | "deep") => {
+    async (
+      prompt: string,
+      researchOverride?: boolean,
+      teamOverride?: boolean,
+      modeOverride?: "fast" | "mixed" | "deep",
+      goalLoop = false
+    ): Promise<boolean> => {
       setGenerating(true);
       resetRunState();
+      if (goalLoop) setGoalRound(0);
       setMessages((m) => [...m, { id: `tmp_${Date.now()}`, role: "user", content: prompt }]);
       try {
         const res = await fetch(`/api/projects/${projectId}/generate`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ prompt, research: researchOverride ?? research, team: teamOverride ?? team, mode: modeOverride ?? genMode }),
+          body: JSON.stringify({
+            prompt,
+            research: researchOverride ?? research,
+            team: teamOverride ?? team,
+            mode: modeOverride ?? genMode,
+            target: pickTarget ? { selector: pickTarget.selector, snippet: pickTarget.snippet } : undefined,
+            goalLoop: goalLoop || undefined,
+          }),
         });
         const data = await res.json().catch(() => ({}));
         if (res.status === 401) {
           location.href = "/login";
-          return;
+          return false;
         }
         if (res.status === 409 && data.jobId) {
           await attachJob(data.jobId);
-          return;
+          return false;
         }
         if (!res.ok) throw new Error(data.error || `请求失败 (${res.status})`);
+        setPickTarget(null);
         if (data.position > 0) setQueuePos(data.position);
         await attachJob(data.jobId);
+        return true;
       } catch (err) {
         pushError(`生成失败:${err instanceof Error ? err.message : "网络错误"}`);
         setGenerating(false);
+        return false;
       }
     },
-    [projectId, research, team, genMode, attachJob, resetRunState, pushError]
+    [projectId, research, team, genMode, pickTarget, attachJob, resetRunState, pushError]
   );
 
   // Initial load: reconnect to a live job if one exists, else auto-start a freshly created project.
@@ -355,6 +438,7 @@ export default function Builder({ projectId }: { projectId: string }) {
         let bootResearch = false;
         let bootTeam = false;
         let bootMode: "fast" | "mixed" | "deep" = "fast";
+        let bootGoal = false;
         try {
           const parsed = JSON.parse(pending);
           if (parsed && typeof parsed.prompt === "string") {
@@ -362,6 +446,7 @@ export default function Builder({ projectId }: { projectId: string }) {
             bootResearch = !!parsed.research;
             bootTeam = !!parsed.team;
             if (parsed.mode === "mixed" || parsed.mode === "deep") bootMode = parsed.mode;
+            bootGoal = !!parsed.goal;
           }
         } catch {
           // legacy plain-string pending value
@@ -369,7 +454,7 @@ export default function Builder({ projectId }: { projectId: string }) {
         if (bootResearch) setResearch(true);
         if (bootTeam) setTeam(true);
         if (bootMode !== "fast") setGenMode(bootMode);
-        generate(bootPrompt, bootResearch, bootTeam, bootMode);
+        generate(bootPrompt, bootResearch, bootTeam, bootMode, bootGoal);
       }
     })();
   }, [load, generate, attachJob, resetRunState, projectId]);
@@ -377,6 +462,61 @@ export default function Builder({ projectId }: { projectId: string }) {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, spec, generating]);
+
+  // 运营面板: visitor feedback + runtime error reports of the published app.
+  const loadReports = useCallback(async () => {
+    const res = await fetch(`/api/projects/${projectId}/reports`);
+    if (!res.ok) return;
+    const data = await res.json().catch(() => ({}));
+    const list: AppReport[] = data.reports ?? [];
+    setReports(list);
+    setReportSel(new Set(list.filter((r) => r.status === "new").map((r) => r.id)));
+  }, [projectId]);
+
+  useEffect(() => {
+    if (detail?.project.published_version_id) loadReports();
+  }, [detail?.project.published_version_id, loadReports]);
+
+  async function markReports(ids: string[], status: "handled" | "dismissed") {
+    if (!ids.length) return;
+    await fetch(`/api/projects/${projectId}/reports`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids, status }),
+    });
+    loadReports();
+  }
+
+  async function absorbReports(kind: "feedback" | "error") {
+    const items = reports.filter((r) => r.status === "new" && r.kind === kind && reportSel.has(r.id));
+    if (!items.length || generating) return;
+    setReportsOpen(false);
+    const list = items.map((r) => `- ${r.content}`).join("\n");
+    const prompt =
+      kind === "feedback"
+        ? `【吸收访客反馈】以下是发布版本收到的真实访客反馈,请在保持现有功能与风格的基础上,吸收其中合理的建议改进应用:\n${list}`
+        : `【线上自愈】发布版本在访客浏览器中捕获到以下真实运行时错误,请修复它们,功能与视觉保持不变:\n${list}`;
+    const ok = await generate(prompt);
+    if (ok) await markReports(items.map((r) => r.id), "handled");
+  }
+
+  // 指哪改哪: receive the element the user picked inside the preview iframe.
+  useEffect(() => {
+    function onPick(e: MessageEvent) {
+      const d = e.data;
+      if (!d || d.type !== "quark_pick" || typeof d.selector !== "string") return;
+      const text = typeof d.text === "string" ? d.text.slice(0, 24) : "";
+      setPickTarget({
+        selector: d.selector.slice(0, 300),
+        snippet: typeof d.snippet === "string" ? d.snippet.slice(0, 600) : "",
+        label: `<${d.tag}>${text ? ` ${text}` : ""}`,
+      });
+      setPickMode(false);
+      setMobilePane("chat");
+    }
+    window.addEventListener("message", onPick);
+    return () => window.removeEventListener("message", onPick);
+  }, []);
 
   useEffect(() => {
     if (codeRef.current) codeRef.current.scrollTop = codeRef.current.scrollHeight;
@@ -423,7 +563,7 @@ export default function Builder({ projectId }: { projectId: string }) {
     setPublishBusy(false);
   }
 
-  async function patchProject(body: { name?: string; inGallery?: boolean; platform?: "web" | "mobile"; theme?: string | null; connectors?: string[]; domainName?: string | null }) {
+  async function patchProject(body: { name?: string; inGallery?: boolean; platform?: "web" | "mobile"; theme?: string | null; connectors?: string[]; domainName?: string | null; goal?: string | null; goalRounds?: number; goalActive?: boolean }) {
     const res = await fetch(`/api/projects/${projectId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -447,11 +587,29 @@ export default function Builder({ projectId }: { projectId: string }) {
     const res = await fetch(`/api/projects/${projectId}/attachments`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ filename: file.name, mime, dataBase64: btoa(binary) }),
+      body: JSON.stringify({ filename: file.webkitRelativePath || file.name, mime, dataBase64: btoa(binary) }),
     });
     const data = await res.json().catch(() => ({}));
     if (res.ok) setAttachments(data.attachments);
     else pushError(data.error || "上传失败");
+  }
+
+  /** Folder picks contain arbitrary trees: skip ineligible files instead of erroring per file. */
+  async function uploadFiles(list: FileList | null, fromFolder = false) {
+    if (!list) return;
+    let count = attachments.length;
+    let skipped = 0;
+    for (const f of Array.from(list)) {
+      const bad = precheckFile(f, count);
+      if (bad) {
+        if (fromFolder) skipped++;
+        else pushError(`${f.name}:${bad}`);
+        continue;
+      }
+      await uploadFile(f);
+      count++;
+    }
+    if (skipped) pushError(`已跳过文件夹内 ${skipped} 个不支持或超限的文件`);
   }
 
   async function removeAttachment(attId: string) {
@@ -493,6 +651,14 @@ export default function Builder({ projectId }: { projectId: string }) {
 
   const project = detail?.project;
   const versions = detail?.versions ?? [];
+  const GOAL_STATUS_LABEL: Record<string, string> = {
+    met: "✅ 目标已达成",
+    cap: "已达轮数上限",
+    stopped: "已停止",
+    no_credits: "积分不足而停止",
+    error: "因异常而停止",
+    running: "构建中",
+  };
   const appsOrigin = process.env.NEXT_PUBLIC_APPS_ORIGIN;
   const publishedUrl =
     project?.published_version_id && project.slug
@@ -648,6 +814,95 @@ export default function Builder({ projectId }: { projectId: string }) {
             <div className="relative">
               <button
                 className="btn-ghost px-3 py-1.5 text-xs"
+                onClick={() => {
+                  if (!reportsOpen) loadReports();
+                  setReportsOpen(!reportsOpen);
+                }}
+                title="运营:访客反馈与线上运行时报错,可一键吸收为新版本"
+              >
+                📣 运营
+                {reports.filter((r) => r.status === "new").length > 0 && (
+                  <span className="ml-1 px-1.5 py-0.5 rounded-full bg-bad/15 text-bad text-[10px]">
+                    {reports.filter((r) => r.status === "new").length}
+                  </span>
+                )}
+              </button>
+              {reportsOpen && (
+                <div className="absolute right-0 top-full mt-1 card p-3 z-20 w-80 max-w-[90vw] flex flex-col gap-2 text-xs">
+                  <p className="font-mono text-[10px] tracking-widest text-muted">
+                    运营 · 反馈闭环
+                    {reports.some((r) => r.status !== "new") && (
+                      <span className="ml-2">已处理 {reports.filter((r) => r.status !== "new").length}</span>
+                    )}
+                  </p>
+                  {reports.filter((r) => r.status === "new").length === 0 ? (
+                    <p className="text-muted py-2">
+                      暂无新反馈或报错。发布应用自带 💬 反馈组件与错误上报,访客的声音会汇聚到这里。
+                    </p>
+                  ) : (
+                    <>
+                      <div className="flex flex-col gap-1.5 max-h-56 overflow-y-auto">
+                        {reports
+                          .filter((r) => r.status === "new")
+                          .map((r) => (
+                            <label key={r.id} className="flex items-start gap-2 border border-line rounded-lg p-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                className="mt-0.5"
+                                checked={reportSel.has(r.id)}
+                                onChange={(e) => {
+                                  const next = new Set(reportSel);
+                                  if (e.target.checked) next.add(r.id);
+                                  else next.delete(r.id);
+                                  setReportSel(next);
+                                }}
+                              />
+                              <span className="flex-1 min-w-0">
+                                <span className={r.kind === "error" ? "text-bad" : "text-ink"}>
+                                  {r.kind === "error" ? "🐞 报错" : "💬 反馈"}
+                                  {r.artifact_seq != null && <span className="text-muted ml-1">#{r.artifact_seq}</span>}
+                                </span>
+                                <span className="block text-muted break-words mt-0.5">{r.content}</span>
+                              </span>
+                              <button
+                                className="text-muted hover:text-bad shrink-0"
+                                title="忽略"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  markReports([r.id], "dismissed");
+                                }}
+                              >
+                                ×
+                              </button>
+                            </label>
+                          ))}
+                      </div>
+                      <div className="flex gap-2 pt-1 border-t border-line">
+                        <button
+                          className="btn-primary px-3 py-1.5 flex-1"
+                          disabled={generating || !reports.some((r) => r.status === "new" && r.kind === "feedback" && reportSel.has(r.id))}
+                          onClick={() => absorbReports("feedback")}
+                          title="把勾选的反馈交给智能体,生成一个吸收了这些建议的新版本"
+                        >
+                          ✨ 吸收反馈
+                        </button>
+                        <button
+                          className="btn-ghost px-3 py-1.5 flex-1"
+                          disabled={generating || !reports.some((r) => r.status === "new" && r.kind === "error" && reportSel.has(r.id))}
+                          onClick={() => absorbReports("error")}
+                          title="把勾选的线上报错交给智能体一键修复"
+                        >
+                          🔧 修复报错
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="relative">
+              <button
+                className="btn-ghost px-3 py-1.5 text-xs"
                 onClick={() => setDeployOpen(!deployOpen)}
                 title="部署到本机或外部云"
               >
@@ -779,6 +1034,52 @@ export default function Builder({ projectId }: { projectId: string }) {
         </button>
       </header>
 
+      {project?.goal && (
+        <div className="flex items-center gap-2 px-4 py-2 border-b border-line bg-accent-soft/40 text-xs shrink-0">
+          <span className="shrink-0">🎯</span>
+          <span className="truncate" title={project.goal}>
+            {project.goal}
+          </span>
+          {project.goal_active ? (
+            <span className="text-accent shrink-0">
+              持续构建 · 第 {Math.min(Math.max(goalRound ?? project.goal_round, 1), project.goal_rounds)}/
+              {project.goal_rounds} 轮
+            </span>
+          ) : (
+            project.goal_status && (
+              <span className={`shrink-0 ${project.goal_status === "met" ? "text-good" : "text-muted"}`}>
+                {GOAL_STATUS_LABEL[project.goal_status] ?? project.goal_status}
+              </span>
+            )
+          )}
+          <span className="flex-1" />
+          {project.goal_active ? (
+            <button
+              className="btn-ghost px-2.5 py-1 text-xs text-bad shrink-0"
+              onClick={() => {
+                patchProject({ goalActive: false });
+                setMessages((m) => [
+                  ...m,
+                  { id: `tmp_gs_${Date.now()}`, role: "agent", content: "⏹ 已请求停止,将在本轮结束后生效" },
+                ]);
+              }}
+              title="本轮生成结束后停止自动迭代"
+            >
+              ⏹ 停止
+            </button>
+          ) : (
+            <button
+              className="btn-primary px-2.5 py-1 text-xs shrink-0"
+              disabled={generating}
+              onClick={() => generate(`按目标继续完善应用:${project.goal}`, undefined, undefined, undefined, true)}
+              title="从当前版本开始向目标自动迭代"
+            >
+              ▶ 持续构建
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="flex-1 flex min-h-0">
         {/* left: conversation + agent timeline */}
         <aside
@@ -825,6 +1126,94 @@ export default function Builder({ projectId }: { projectId: string }) {
                   </div>
                 );
               }
+              if (m.meta === "goal_eval") {
+                let ev: { met?: boolean; score?: number; gaps?: string[]; next_request?: string; round?: number; maxRounds?: number } | null = null;
+                try {
+                  ev = JSON.parse(m.content);
+                } catch {
+                  ev = null;
+                }
+                if (!ev) return null;
+                return (
+                  <div
+                    key={m.id}
+                    className={`p-3 text-xs self-start max-w-[92%] border rounded-lg ${
+                      ev.met ? "border-good/40 bg-good/5" : "border-amber/40 bg-amber/5"
+                    }`}
+                  >
+                    <p className={`font-mono text-[10px] tracking-widest mb-1.5 ${ev.met ? "text-good" : "text-amber"}`}>
+                      GOAL EVAL · 第 {ev.round}/{ev.maxRounds} 轮
+                    </p>
+                    <p className="text-ink">
+                      {ev.met ? "✅ 已达标" : "❌ 未达标"}
+                      {typeof ev.score === "number" && <span className="text-muted ml-1.5">完成度 {ev.score}</span>}
+                    </p>
+                    {!!ev.gaps?.length && (
+                      <ul className="mt-1.5 space-y-1 text-muted">
+                        {ev.gaps.map((gp) => (
+                          <li key={gp}>· {gp}</li>
+                        ))}
+                      </ul>
+                    )}
+                    {!ev.met && ev.next_request && <p className="text-muted mt-1.5">下一轮:{ev.next_request.slice(0, 160)}</p>}
+                  </div>
+                );
+              }
+              if (m.meta === "fusion") {
+                let plan: { name?: string; summary?: string; from_a?: string[]; from_b?: string[]; fusion?: string[] } | null = null;
+                try {
+                  plan = JSON.parse(m.content);
+                } catch {
+                  plan = null;
+                }
+                if (!plan) return null;
+                return (
+                  <div key={m.id} className="p-3 text-xs self-start max-w-[92%] border border-accent/40 bg-accent-soft rounded-lg">
+                    <p className="font-mono text-[10px] tracking-widest text-accent mb-1.5">⚛ FUSION · 聚变蓝图</p>
+                    {plan.name && <p className="font-semibold text-sm">{plan.name}</p>}
+                    {plan.summary && <p className="text-muted mt-1">{plan.summary}</p>}
+                    {!!plan.from_a?.length && <p className="text-muted mt-1.5">来自 A:{plan.from_a.join(" · ")}</p>}
+                    {!!plan.from_b?.length && <p className="text-muted mt-1">来自 B:{plan.from_b.join(" · ")}</p>}
+                    {!!plan.fusion?.length && <p className="text-ink mt-1">✨ 聚变:{plan.fusion.join(" · ")}</p>}
+                  </div>
+                );
+              }
+              if (m.meta === "acceptance") {
+                let results: { criterion: string; pass: boolean; skipped?: boolean; note?: string }[] | null = null;
+                try {
+                  results = JSON.parse(m.content);
+                } catch {
+                  results = null;
+                }
+                if (!Array.isArray(results) || !results.length) return null;
+                const passN = results.filter((r) => r.pass && !r.skipped).length;
+                const totalN = results.filter((r) => !r.skipped).length;
+                return (
+                  <div
+                    key={m.id}
+                    className={`p-3 text-xs self-start max-w-[92%] border rounded-lg ${
+                      passN === totalN ? "border-good/40 bg-good/5" : "border-amber/40 bg-amber/5"
+                    }`}
+                  >
+                    <p className={`font-mono text-[10px] tracking-widest mb-1.5 ${passN === totalN ? "text-good" : "text-amber"}`}>
+                      验收实测 · {passN}/{totalN} 通过
+                    </p>
+                    <ul className="space-y-1">
+                      {results.map((r, i) => (
+                        <li key={i} className="flex items-start gap-1.5">
+                          <span className={r.skipped ? "text-muted" : r.pass ? "text-good" : "text-bad"}>
+                            {r.skipped ? "○" : r.pass ? "✓" : "✗"}
+                          </span>
+                          <span className="text-muted flex-1">
+                            {r.criterion}
+                            {r.note && <span className="block text-[10px] opacity-80">{r.note}</span>}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              }
               if (m.meta === "research") {
                 let brief: {
                   audience?: string;
@@ -863,6 +1252,9 @@ export default function Builder({ projectId }: { projectId: string }) {
                       : `self-start max-w-[92%] text-sm whitespace-pre-wrap leading-relaxed ${m.meta === "error" ? "text-bad" : "text-ink"}`
                   }
                 >
+                  {m.role === "user" && m.meta === "goal_auto" && (
+                    <span className="block text-[10px] text-accent mb-1">🤖 自动迭代</span>
+                  )}
                   {m.role === "agent" && <span className="text-accent mr-1.5">⚛</span>}
                   {m.content}
                 </div>
@@ -895,6 +1287,9 @@ export default function Builder({ projectId }: { projectId: string }) {
               <div className="card p-4 self-stretch">
                 <p className="font-mono text-[10px] tracking-widest text-muted mb-3">
                   AGENT PIPELINE
+                  {!!project?.goal_active && (
+                    <span className="text-accent ml-2">🎯 第 {Math.min(Math.max(goalRound ?? project.goal_round, 1), project.goal_rounds)} 轮</span>
+                  )}
                   {queuePos > 0 && <span className="text-amber ml-2">排队中 · 第 {queuePos} 位</span>}
                   {reconnecting && <span className="text-amber ml-2">连接中断,正在重连…</span>}
                 </p>
@@ -902,6 +1297,7 @@ export default function Builder({ projectId }: { projectId: string }) {
                   {(Object.keys(STAGE_LABELS) as StageName[])
                     .filter((name) => {
                       if (name === "researcher") return stages.researcher.state !== "idle" || research;
+                      if (name === "fusion") return stages.fusion.state !== "idle";
                       if (name === "pm" || name === "architect") return stages[name].state !== "idle" || team;
                       if (name === "planner") return !team || stages.planner.state !== "idle";
                       return true;
@@ -931,6 +1327,19 @@ export default function Builder({ projectId }: { projectId: string }) {
           </div>
 
           <div className="p-3 border-t border-line shrink-0">
+            {pickTarget && (
+              <div className="flex items-center gap-2 mb-2">
+                <span className="spec-chip px-2 py-1 text-[11px] flex items-center gap-1.5 font-mono" title={pickTarget.selector}>
+                  🎯 {pickTarget.label}
+                  {!generating && (
+                    <button className="text-muted hover:text-bad" onClick={() => setPickTarget(null)} aria-label="取消选取">
+                      ×
+                    </button>
+                  )}
+                </span>
+                <span className="text-[10px] text-muted">下次迭代将聚焦修改该元素</span>
+              </div>
+            )}
             <div className="flex items-center gap-2 mb-2 flex-wrap">
               <button
                 className="btn-ghost px-2.5 py-1 text-xs"
@@ -940,14 +1349,33 @@ export default function Builder({ projectId }: { projectId: string }) {
               >
                 📎 附件
               </button>
+              <button
+                className="btn-ghost px-2.5 py-1 text-xs"
+                onClick={() => folderInputRef.current?.click()}
+                disabled={generating}
+                title="上传整个文件夹,自动收取其中支持的文本与图片文件"
+              >
+                📁 文件夹
+              </button>
               <input
                 ref={fileInputRef}
                 type="file"
+                multiple
                 className="hidden"
                 accept=".txt,.md,.csv,.json,image/png,image/jpeg,image/webp,image/svg+xml"
                 onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) uploadFile(f);
+                  uploadFiles(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+              <input
+                ref={folderInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                {...({ webkitdirectory: "" } as React.InputHTMLAttributes<HTMLInputElement>)}
+                onChange={(e) => {
+                  uploadFiles(e.target.files, true);
                   e.target.value = "";
                 }}
               />
@@ -967,6 +1395,73 @@ export default function Builder({ projectId }: { projectId: string }) {
               >
                 👥 团队模式{team ? " ✓" : ""}
               </button>
+              <div className="relative">
+                <button
+                  className={`px-2.5 py-1 text-xs rounded-lg border transition-colors ${project?.goal ? "border-accent/60 text-accent bg-accent-soft" : "border-line text-muted hover:text-ink"}`}
+                  onClick={() => {
+                    if (!goalOpen) {
+                      setGoalDraft(project?.goal ?? "");
+                      setGoalRoundsDraft(project?.goal_rounds ?? 5);
+                    }
+                    setGoalOpen(!goalOpen);
+                  }}
+                  disabled={generating}
+                  title="目标模式:设定目标后自动持续迭代,直到评估达标或轮数上限"
+                >
+                  🎯 目标{project?.goal ? " ✓" : ""}
+                </button>
+                {goalOpen && (
+                  <div className="absolute bottom-full mb-1 left-0 card p-3 z-20 flex flex-col gap-2 w-72">
+                    <p className="font-mono text-[10px] tracking-widest text-muted">目标模式 · 持续构建</p>
+                    <textarea
+                      className="input w-full px-2.5 py-2 text-xs resize-none"
+                      rows={3}
+                      maxLength={500}
+                      placeholder="目标(达标标准),例如:一个可记录/分类/统计、支持导出 CSV 的记账应用"
+                      value={goalDraft}
+                      onChange={(e) => setGoalDraft(e.target.value)}
+                    />
+                    <label className="flex items-center gap-2 text-xs text-muted">
+                      轮数上限
+                      <select
+                        className="input px-2 py-1 text-xs"
+                        value={goalRoundsDraft}
+                        onChange={(e) => setGoalRoundsDraft(Number(e.target.value))}
+                      >
+                        {[3, 5, 8].map((n) => (
+                          <option key={n} value={n}>
+                            {n} 轮
+                          </option>
+                        ))}
+                      </select>
+                      <span className="text-[10px]">每轮照常扣积分</span>
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        className="btn-ghost px-3 py-1.5 text-xs flex-1"
+                        onClick={async () => {
+                          setGoalOpen(false);
+                          await patchProject({ goal: goalDraft.trim() || null, goalRounds: goalRoundsDraft });
+                        }}
+                      >
+                        保存
+                      </button>
+                      <button
+                        className="btn-primary px-3 py-1.5 text-xs flex-1"
+                        disabled={!goalDraft.trim() || generating}
+                        onClick={async () => {
+                          setGoalOpen(false);
+                          const g = goalDraft.trim();
+                          await patchProject({ goal: g, goalRounds: goalRoundsDraft });
+                          generate(`按目标继续完善应用:${g}`, undefined, undefined, undefined, true);
+                        }}
+                      >
+                        保存并持续构建
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
               <div className="relative">
                 <button
                   className="px-2.5 py-1 text-xs rounded-lg border border-line text-muted hover:text-ink transition-colors"
@@ -1086,6 +1581,17 @@ export default function Builder({ projectId }: { projectId: string }) {
                 {t === "preview" ? "预览" : "代码"}
               </button>
             ))}
+            {tab === "preview" && html && !generating && (
+              <button
+                className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${
+                  pickMode ? "border-accent/60 text-accent bg-accent-soft" : "border-line text-muted hover:text-ink"
+                }`}
+                onClick={() => setPickMode(!pickMode)}
+                title="指哪改哪:在预览中点选一个元素,下一次迭代将聚焦修改它"
+              >
+                🎯 {pickMode ? "点击预览中的元素…" : "选取元素"}
+              </button>
+            )}
             {previewReady && tab === "code" && !generating && (
               <button
                 className="px-3 py-1.5 text-xs rounded-lg text-good border border-good/40"
@@ -1117,7 +1623,7 @@ export default function Builder({ projectId }: { projectId: string }) {
                         <iframe
                           className="w-full h-full bg-white"
                           sandbox="allow-scripts allow-forms allow-modals allow-popups"
-                          srcDoc={html}
+                          srcDoc={pickMode ? html + INSPECTOR_SCRIPT : html}
                           title="应用预览"
                         />
                       </div>
@@ -1126,7 +1632,7 @@ export default function Builder({ projectId }: { projectId: string }) {
                     <iframe
                       className="w-full flex-1 bg-white"
                       sandbox="allow-scripts allow-forms allow-modals allow-popups"
-                      srcDoc={html}
+                      srcDoc={pickMode ? html + INSPECTOR_SCRIPT : html}
                       title="应用预览"
                     />
                   )}

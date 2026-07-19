@@ -159,8 +159,27 @@ function createDb(): DatabaseSync {
   ensureColumn(db, "projects", "domain_name", "domain_name TEXT");
   ensureColumn(db, "users", "credits", "credits INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "users", "plan", "plan TEXT NOT NULL DEFAULT 'free'");
+  ensureColumn(db, "projects", "goal", "goal TEXT");
+  ensureColumn(db, "projects", "goal_active", "goal_active INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "projects", "goal_round", "goal_round INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "projects", "goal_rounds", "goal_rounds INTEGER NOT NULL DEFAULT 5");
+  ensureColumn(db, "projects", "goal_status", "goal_status TEXT");
+  ensureColumn(db, "projects", "acceptance", "acceptance TEXT");
+  ensureColumn(db, "projects", "fused_from", "fused_from TEXT");
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_domain ON projects(domain_name) WHERE domain_name IS NOT NULL");
   db.exec("CREATE INDEX IF NOT EXISTS idx_credit_events_user ON credit_events(user_id, created_at)");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS app_reports (
+      id           TEXT PRIMARY KEY,
+      project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      artifact_seq INTEGER,
+      kind         TEXT NOT NULL CHECK (kind IN ('feedback','error')),
+      content      TEXT NOT NULL,
+      status       TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new','handled','dismissed')),
+      created_at   INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_app_reports_project ON app_reports(project_id, status, created_at);
+  `);
   backfillArtifacts(db);
   return db;
 }

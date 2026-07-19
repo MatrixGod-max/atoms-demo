@@ -5,8 +5,9 @@ set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:3000}"
 JAR="$(mktemp)"
+OWNER_JAR="$(mktemp)"
 EMAIL="smoke-$(date +%s)-$RANDOM@test.dev"
-trap 'rm -f "$JAR"' EXIT
+trap 'rm -f "$JAR" "$OWNER_JAR"' EXIT
 
 step() { echo "== $*"; }
 fail() { echo "SMOKE FAILED: $*" >&2; exit 1; }
@@ -18,6 +19,7 @@ step "register $EMAIL"
 curl -fsS -c "$JAR" -X POST "$BASE_URL/api/auth/register" \
   -H 'content-type: application/json' \
   -d "{\"email\":\"$EMAIL\",\"password\":\"Smoke2026ci\"}" | grep -q '"ok":true' || fail "register"
+cp "$JAR" "$OWNER_JAR" # later steps re-register with the same jar; keep the first account's session
 
 step "create project"
 PROJ=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects" \
@@ -210,6 +212,48 @@ curl -fsS -b "$JAR" -X PATCH "$BASE_URL/api/projects/$NPROJ" \
   -H 'content-type: application/json' -d '{"domainName":null}' | grep -q '"ok":true' || fail "release domain"
 DCODE2=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/domains/check?domain=$DNAME.quark-apps.lexarcai.com")
 [ "$DCODE2" = "404" ] || fail "released domain check should 404, got $DCODE2"
+
+step "v13: 指哪改哪 — target flows into the iteration"
+TJOB=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects/$NPROJ/generate" \
+  -H 'content-type: application/json' \
+  -d '{"prompt":"改这个按钮","target":{"selector":"#btn","snippet":"<button id=\"btn\">Go</button>"}}' | sed -E 's/.*"jobId":"([^"]+)".*/\1/')
+[ -n "$TJOB" ] || fail "start target job"
+timeout 120 curl -fsS -N -b "$JAR" "$BASE_URL/api/jobs/$TJOB/stream" | grep -q '"type":"version"' || fail "target gen"
+curl -fsS -b "$JAR" "$BASE_URL/api/projects/$NPROJ" | grep -q 'target: #btn' || fail "target marker missing"
+
+step "v13: feedback loop — visitor report + owner panel"
+curl -fsS -X POST "$BASE_URL/api/apps/$SLUG/report" \
+  -H 'content-type: application/json' -d '{"kind":"feedback","content":"smoke 反馈:希望有深色模式"}' | grep -q '"ok":true' || fail "feedback report"
+curl -fsS -X POST "$BASE_URL/api/apps/$SLUG/report" \
+  -H 'content-type: application/json' -d '{"kind":"error","content":"TypeError: smoke"}' | grep -q '"ok":true' || fail "error report"
+curl -fsS -X POST "$BASE_URL/api/apps/$SLUG/report" \
+  -H 'content-type: application/json' -d '{"kind":"error","content":"TypeError: smoke"}' | grep -q '"deduped":true' || fail "error dedup"
+REPORTS=$(curl -fsS -b "$OWNER_JAR" "$BASE_URL/api/projects/$PROJ/reports")
+echo "$REPORTS" | grep -q '深色模式' || fail "owner sees feedback"
+RID=$(echo "$REPORTS" | sed -E 's/.*"id":"([^"]+)".*/\1/')
+curl -fsS -b "$OWNER_JAR" -X PATCH "$BASE_URL/api/projects/$PROJ/reports" \
+  -H 'content-type: application/json' -d "{\"ids\":[\"$RID\"],\"status\":\"dismissed\"}" | grep -q '"ok":true' || fail "dismiss report"
+BCODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/api/apps/$SLUG/report" \
+  -H 'content-type: application/json' -d '{"kind":"nope","content":"x"}')
+[ "$BCODE" = "400" ] || fail "bad report kind should 400, got $BCODE"
+
+step "v13: fusion — merge two published apps"
+NSLUG=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects/$NPROJ/publish" \
+  -H 'content-type: application/json' -d '{"action":"publish"}' | sed -E 's/.*"slug":"([^"]+)".*/\1/')
+[ -n "$NSLUG" ] || fail "publish second source"
+FPROJ=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects" \
+  -H 'content-type: application/json' -d "{\"fuseSlugs\":[\"$SLUG\",\"$NSLUG\"]}" | sed -E 's/.*"id":"([^"]+)".*/\1/')
+[ -n "$FPROJ" ] || fail "create fusion project"
+FJOB=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects/$FPROJ/generate" \
+  -H 'content-type: application/json' -d '{"prompt":"聚变合成"}' | sed -E 's/.*"jobId":"([^"]+)".*/\1/')
+[ -n "$FJOB" ] || fail "start fusion job"
+FSTREAM=$(timeout 120 curl -fsS -N -b "$JAR" "$BASE_URL/api/jobs/$FJOB/stream")
+echo "$FSTREAM" | grep -q '"type":"fusion"' || fail "no fusion event"
+echo "$FSTREAM" | grep -q '"type":"version"' || fail "fusion produced no version"
+curl -fsS -b "$JAR" "$BASE_URL/api/projects/$FPROJ" | grep -q 'fused:' || fail "fusion marker missing"
+FCODE=$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -X POST "$BASE_URL/api/projects" \
+  -H 'content-type: application/json' -d "{\"fuseSlugs\":[\"$SLUG\",\"$SLUG\"]}")
+[ "$FCODE" = "400" ] || fail "same-slug fusion should 400, got $FCODE"
 
 step "unauthenticated dashboard access is redirected"
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/dashboard")

@@ -49,7 +49,9 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   const { id } = await ctx.params;
   if (!ownedProject(user.id, id)) return NextResponse.json({ error: "项目不存在" }, { status: 404 });
 
-  const { name, inGallery, platform, theme, connectors, domainName } = await req.json().catch(() => ({}));
+  const { name, inGallery, platform, theme, connectors, domainName, goal, goalRounds, goalActive } = await req
+    .json()
+    .catch(() => ({}));
   if (typeof name === "string" && name.trim()) {
     db.prepare("UPDATE projects SET name = ?, updated_at = ? WHERE id = ?").run(name.trim().slice(0, 40), now(), id);
   }
@@ -83,6 +85,25 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   }
   if (typeof inGallery === "boolean") {
     db.prepare("UPDATE projects SET in_gallery = ? WHERE id = ?").run(inGallery ? 1 : 0, id);
+  }
+  if (goal === null) {
+    db.prepare("UPDATE projects SET goal = NULL, goal_status = NULL, goal_round = 0, updated_at = ? WHERE id = ?").run(now(), id);
+  } else if (typeof goal === "string" && goal.trim()) {
+    // Changing the goal mid-loop is allowed: the next round boundary picks it up.
+    db.prepare("UPDATE projects SET goal = ?, updated_at = ? WHERE id = ?").run(goal.trim().slice(0, 500), now(), id);
+  }
+  if (typeof goalRounds === "number" && Number.isFinite(goalRounds)) {
+    db.prepare("UPDATE projects SET goal_rounds = ?, updated_at = ? WHERE id = ?").run(
+      Math.max(1, Math.min(10, Math.round(goalRounds))),
+      now(),
+      id
+    );
+  }
+  if (goalActive === false) {
+    // Only disarming is allowed here; arming happens in the generate route.
+    db.prepare(
+      "UPDATE projects SET goal_status = CASE WHEN goal_active = 1 THEN 'stopped' ELSE goal_status END, goal_active = 0, updated_at = ? WHERE id = ?"
+    ).run(now(), id);
   }
   return NextResponse.json({ ok: true });
 }
