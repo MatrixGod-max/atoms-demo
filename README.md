@@ -6,6 +6,8 @@
 
 **在线体验链接与演示账号通过笔试文档单独提供**(生成消耗真实 LLM API 额度,不在公开页面展示)。
 
+📄 **评审请先看:[提交说明 docs/SUBMISSION.md](docs/SUBMISSION.md)** —— 实现思路与关键取舍 · 当前完成程度(含未做边界)· 继续投入的扩展与优先级。
+
 | ![landing](docs/landing.png) | ![builder](docs/builder.png) |
 |---|---|
 | ![explore](docs/explore.png) | ![mobile](docs/builder-mobile.png) |
