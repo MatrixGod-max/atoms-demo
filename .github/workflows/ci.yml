@@ -8,6 +8,8 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     env:
       AGENT_MOCK: "1"
       CHROME_PATH: /usr/bin/google-chrome
@@ -25,7 +27,19 @@ jobs:
       - name: Unit & integration tests
         run: npm test
       - name: Build
-        run: npm run build
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee build.log
+      - name: Publish failure log for debugging
+        if: failure()
+        run: |
+          tail -c 20000 build.log > /tmp/ci-fail.log 2>/dev/null || echo "no build.log" > /tmp/ci-fail.log
+          git config user.name ci-bot && git config user.email ci@quark
+          git checkout --orphan ci-debug
+          git rm -rfq . 2>/dev/null || true
+          cp /tmp/ci-fail.log fail.log
+          git add fail.log && git commit -qm "ci failure log $GITHUB_RUN_ID"
+          git push -f origin ci-debug
       - name: E2E smoke (mock pipeline)
         run: |
           DATA_DIR="$RUNNER_TEMP/quark-ci" npm run start -- --port 3456 &
