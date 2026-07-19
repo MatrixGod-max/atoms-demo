@@ -7,8 +7,6 @@ export const dynamic = "force-dynamic";
 export async function PATCH(req: Request) {
   const user = await getUser();
   if (!user) return NextResponse.json({ error: "未登录" }, { status: 401 });
-  const refusal = demoGuard(user);
-  if (refusal) return NextResponse.json({ error: refusal }, { status: 403 });
 
   const { name, currentPassword, newPassword } = await req.json().catch(() => ({}));
 
@@ -20,6 +18,8 @@ export async function PATCH(req: Request) {
   }
 
   if (currentPassword !== undefined || newPassword !== undefined) {
+    const refusal = demoGuard(user);
+    if (refusal) return NextResponse.json({ error: refusal }, { status: 403 });
     if (typeof currentPassword !== "string" || typeof newPassword !== "string") {
       return NextResponse.json({ error: "请填写当前密码和新密码" }, { status: 400 });
     }

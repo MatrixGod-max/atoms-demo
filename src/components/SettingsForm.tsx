@@ -61,7 +61,9 @@ export default function SettingsForm({
   return (
     <div className="flex flex-col gap-5">
       {isDemo && (
-        <div className="card p-4 text-xs text-muted">演示账号只读,注册即可体验完整功能。</div>
+        <div className="card p-4 text-xs text-muted">
+          演示账号已开放全部功能;因账号为评审共享,仅不支持修改密码。
+        </div>
       )}
 
       <section className="card p-5">
@@ -75,14 +77,13 @@ export default function SettingsForm({
           className="input w-full px-3 py-2 text-sm"
           value={newName}
           maxLength={40}
-          disabled={isDemo}
           onChange={(e) => setNewName(e.target.value)}
         />
         <div className="flex items-center gap-3 mt-3">
           <button
             type="button"
             className="btn-primary px-4 py-2 text-sm"
-            disabled={isDemo || savingName || !newName.trim() || newName.trim() === name}
+            disabled={savingName || !newName.trim() || newName.trim() === name}
             onClick={saveName}
           >
             {savingName ? "保存中…" : "保存"}

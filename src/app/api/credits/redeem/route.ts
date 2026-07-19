@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { demoGuard, getUser } from "@/lib/auth";
+import { getUser } from "@/lib/auth";
 import { balance, redeemCode } from "@/lib/credits";
 import { rateLimit } from "@/lib/ratelimit";
 
@@ -8,8 +8,6 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   const user = await getUser();
   if (!user) return NextResponse.json({ error: "未登录" }, { status: 401 });
-  const refusal = demoGuard(user);
-  if (refusal) return NextResponse.json({ error: refusal }, { status: 403 });
 
   const rl = rateLimit(`redeem:${user.id}`, 10, 60_000);
   if (!rl.ok) {

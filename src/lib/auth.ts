@@ -15,9 +15,12 @@ export interface User {
   isDemo: boolean;
 }
 
-/** Returns the refusal message for read-only demo accounts, or null when allowed. */
+/**
+ * Demo accounts are full-featured; the only thing a shared account must not do
+ * is change its own password (it would lock out every other reviewer).
+ */
 export function demoGuard(user: User): string | null {
-  return user.isDemo ? "演示账号只读,注册即可体验完整功能" : null;
+  return user.isDemo ? "演示账号为共享账号,不支持修改密码;注册即可拥有独立账号" : null;
 }
 
 export function newId(prefix: string): string {

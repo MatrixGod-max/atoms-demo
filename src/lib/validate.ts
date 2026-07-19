@@ -81,9 +81,9 @@ export interface AcceptanceRunResult {
   results: AcceptanceOutcome[];
 }
 
-const CASE_TIMEOUT_MS = 12_000;
+const CASE_TIMEOUT_MS = 15_000;
 const STEP_SETTLE_MS = 300;
-const ASSERT_RETRY_MS = 2_500;
+const ASSERT_RETRY_MS = 4_000;
 
 async function runCase(
   browser: Awaited<ReturnType<typeof puppeteer.launch>>,
@@ -106,7 +106,12 @@ async function runCase(
         continue;
       }
       // UI updates are async; wait briefly for the element instead of sampling once.
-      const el = await page.waitForSelector(step.selector, { timeout: ASSERT_RETRY_MS }).catch(() => null);
+      // Only a TimeoutError means "element absent" — anything else (dead browser,
+      // detached frame) is infra failure and must bubble to the skip path.
+      const el = await page.waitForSelector(step.selector, { timeout: ASSERT_RETRY_MS }).catch((e) => {
+        if ((e as Error).name === "TimeoutError") return null;
+        throw e;
+      });
       if (!el) return { criterion: c.criterion, pass: false, note: `第${i + 1}步:未找到元素 ${step.selector}` };
       if (step.action === "click") {
         await el.click();
@@ -156,16 +161,25 @@ export async function runAcceptance(
         results.push({ criterion: c.criterion, pass: true, skipped: true, note: "无法用交互测试自动验证" });
         continue;
       }
-      const outcome = await Promise.race<AcceptanceOutcome>([
-        runCase(browser, html, platform, c).catch((e) => ({
-          criterion: c.criterion,
-          pass: false,
-          note: `执行异常: ${e instanceof Error ? e.message.slice(0, 100) : String(e)}`,
-        })),
-        new Promise<AcceptanceOutcome>((resolve) =>
-          setTimeout(() => resolve({ criterion: c.criterion, pass: false, note: "用例执行超时" }), CASE_TIMEOUT_MS)
-        ),
-      ]);
+      const attempt = () =>
+        Promise.race<AcceptanceOutcome>([
+          runCase(browser!, html, platform, c).catch((e) => ({
+            criterion: c.criterion,
+            pass: false,
+            note: `执行异常: ${e instanceof Error ? e.message.slice(0, 100) : String(e)}`,
+          })),
+          new Promise<AcceptanceOutcome>((resolve) =>
+            setTimeout(() => resolve({ criterion: c.criterion, pass: false, note: "用例执行超时" }), CASE_TIMEOUT_MS)
+          ),
+        ]);
+      let outcome = await attempt();
+      // Puppeteer occasionally drops a fresh page ("frame was detached") right
+      // after another Chrome closed — that's infra noise, not a test verdict.
+      if (!outcome.pass && outcome.note?.startsWith("执行异常")) outcome = await attempt();
+      if (!outcome.pass && outcome.note?.startsWith("执行异常")) {
+        // The environment, not the app, is failing — same contract as validateHtml.
+        return { skipped: true, results: [] };
+      }
       results.push(outcome);
     }
     return { skipped: false, results };

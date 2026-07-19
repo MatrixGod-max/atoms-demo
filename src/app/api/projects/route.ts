@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db, now } from "@/lib/db";
-import { demoGuard, getUser, newId } from "@/lib/auth";
+import { getUser, newId } from "@/lib/auth";
 
 export async function GET() {
   const user = await getUser();
@@ -18,8 +18,6 @@ export async function GET() {
 export async function POST(req: Request) {
   const user = await getUser();
   if (!user) return NextResponse.json({ error: "未登录" }, { status: 401 });
-  const blocked = demoGuard(user);
-  if (blocked) return NextResponse.json({ error: blocked }, { status: 403 });
   const { prompt, remixSlug, templateId, platform, theme, connectors, goal, fuseSlugs } = await req.json().catch(() => ({}));
   const chosenConnectors = Array.isArray(connectors) && connectors.length ? JSON.stringify(connectors.slice(0, 5)) : null;
   const chosenTheme = typeof theme === "string" && theme.trim() ? theme.trim().slice(0, 20) : null;

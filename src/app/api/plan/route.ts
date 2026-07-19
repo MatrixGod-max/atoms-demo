@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { demoGuard, getUser } from "@/lib/auth";
+import { getUser } from "@/lib/auth";
 import { PLANS, type Plan, balance, switchPlan } from "@/lib/credits";
 
 export const dynamic = "force-dynamic";
@@ -7,8 +7,6 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   const user = await getUser();
   if (!user) return NextResponse.json({ error: "未登录" }, { status: 401 });
-  const refusal = demoGuard(user);
-  if (refusal) return NextResponse.json({ error: refusal }, { status: 403 });
 
   const { plan } = await req.json().catch(() => ({}));
   if (typeof plan !== "string" || !PLANS.includes(plan as Plan)) {

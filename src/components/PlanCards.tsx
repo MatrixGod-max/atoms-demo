@@ -77,7 +77,7 @@ export default function PlanCards({ current, isDemo }: { current: string; isDemo
               <button
                 type="button"
                 className={`${active ? "btn-ghost" : "btn-primary"} px-4 py-2 text-sm`}
-                disabled={active || isDemo || busy !== null}
+                disabled={active || busy !== null}
                 onClick={() => choose(t.id)}
               >
                 {active ? "使用中" : busy === t.id ? "切换中…" : t.id === "free" ? "切换" : "升级"}
@@ -87,7 +87,7 @@ export default function PlanCards({ current, isDemo }: { current: string; isDemo
         })}
       </div>
       {msg && <p className={`mt-4 text-sm ${msg.ok ? "text-good" : "text-bad"}`}>{msg.text}</p>}
-      {isDemo && <p className="mt-4 text-xs text-muted">演示账号只读,注册即可体验完整功能。</p>}
+      {isDemo && <p className="mt-4 text-xs text-muted">演示账号已开放全部功能,切换套餐同样可用。</p>}
     </div>
   );
 }

@@ -45,7 +45,7 @@ export default async function ArtifactPage({ params }: { params: Promise<{ slug:
     .map((r) => ({ ...r })) as unknown as ArtifactRow[];
 
   const user = await getUser();
-  const isOwner = !!user && user.id === project.user_id && !user.isDemo;
+  const isOwner = !!user && user.id === project.user_id;
 
   const isMobile = project.platform === "mobile";
   const latestUrl = appUrl(slug);
