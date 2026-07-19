@@ -113,9 +113,9 @@ const IDLE_STAGES: Record<StageName, { state: StageState; info?: string; model?:
 };
 
 const GEN_MODES = [
-  ["fast", "⚡ 快速", "全阶段 DeepSeek V3:最快,日常迭代首选"],
-  ["mixed", "🧠 混合", "R1 负责研究/规划/评审(想得深),V3 负责编码(写得快)"],
-  ["deep", "🐢 深度", "全阶段 R1:最强推理,速度最慢"],
+  ["fast", "⚡ 快速", "全阶段 V4 非思考:最快,日常迭代首选"],
+  ["mixed", "🧠 混合", "思考模式负责研究/规划/评审,非思考负责编码(写得快)"],
+  ["deep", "🐢 深度", "全阶段思考模式:最强推理,速度最慢"],
 ] as const;
 
 const MAX_RECONNECTS = 5;

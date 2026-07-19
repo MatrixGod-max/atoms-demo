@@ -1,21 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { normalizeMode, stageModels, modelBadge } from "@/lib/models";
 
+const CHAT = "deepseek-v4-flash";
+const REASONER = "deepseek-v4-flash:thinking";
+
 describe("generation modes", () => {
-  it("fast uses chat everywhere", () => {
+  it("fast uses non-thinking everywhere", () => {
     const sm = stageModels("fast");
-    expect(Object.values(sm).every((m) => m === "deepseek-chat")).toBe(true);
+    expect(Object.values(sm).every((m) => m === CHAT)).toBe(true);
   });
-  it("mixed uses reasoner for thinking stages and chat for engineering", () => {
+  it("mixed uses thinking for planning stages and non-thinking for engineering", () => {
     const sm = stageModels("mixed");
-    expect(sm.researcher).toBe("deepseek-reasoner");
-    expect(sm.planner).toBe("deepseek-reasoner");
-    expect(sm.reviewer).toBe("deepseek-reasoner");
-    expect(sm.engineer).toBe("deepseek-chat");
+    expect(sm.researcher).toBe(REASONER);
+    expect(sm.planner).toBe(REASONER);
+    expect(sm.reviewer).toBe(REASONER);
+    expect(sm.engineer).toBe(CHAT);
   });
-  it("deep uses reasoner everywhere", () => {
+  it("deep uses thinking everywhere", () => {
     const sm = stageModels("deep");
-    expect(Object.values(sm).every((m) => m === "deepseek-reasoner")).toBe(true);
+    expect(Object.values(sm).every((m) => m === REASONER)).toBe(true);
   });
   it("normalizeMode rejects unknown values to fast", () => {
     expect(normalizeMode("mixed")).toBe("mixed");
@@ -23,8 +26,8 @@ describe("generation modes", () => {
     expect(normalizeMode("gpt-99")).toBe("fast");
     expect(normalizeMode(undefined)).toBe("fast");
   });
-  it("modelBadge maps api models to short badges", () => {
-    expect(modelBadge("deepseek-chat")).toBe("V3");
-    expect(modelBadge("deepseek-reasoner")).toBe("R1");
+  it("modelBadge maps model tokens to short badges", () => {
+    expect(modelBadge(CHAT)).toBe("V4");
+    expect(modelBadge(REASONER)).toBe("V4思考");
   });
 });

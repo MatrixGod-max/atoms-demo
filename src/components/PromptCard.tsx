@@ -287,7 +287,7 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
               <button
                 type="button"
                 className="flex items-center gap-1.5 px-3 h-9 rounded-lg border border-line text-sm text-ink hover:bg-bg-deep transition-colors"
-                title="生成模式:快速(全V3)/ 混合(R1思考+V3编码)/ 深度(全R1)"
+                title="生成模式:快速(非思考)/ 混合(思考+非思考编码)/ 深度(全思考)"
                 onClick={() => {
                   setPlusOpen(false);
                   setThemeOpen(false);
@@ -302,9 +302,9 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
                 <div className="absolute right-0 top-11 w-52 card rounded-xl p-1.5 shadow-lg z-30">
                   {(
                     [
-                      ["fast", "⚡ 快速", "全阶段 V3,最快"],
-                      ["mixed", "🧠 混合", "R1 思考 + V3 编码"],
-                      ["deep", "🐢 深度", "全阶段 R1,最强最慢"],
+                      ["fast", "⚡ 快速", "V4 非思考,最快"],
+                      ["mixed", "🧠 混合", "思考规划 + 非思考编码"],
+                      ["deep", "🐢 深度", "全阶段思考,最强最慢"],
                     ] as const
                   ).map(([m, label, desc]) => (
                     <button key={m} type="button" className={menuItem} onClick={() => { setGenMode(m); setModeOpen(false); }}>

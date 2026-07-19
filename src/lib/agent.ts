@@ -4,7 +4,20 @@
  */
 
 const API_URL = process.env.DEEPSEEK_API_URL || "https://api.deepseek.com/chat/completions";
-const MODEL = process.env.DEEPSEEK_MODEL || "deepseek-chat";
+const MODEL = process.env.DEEPSEEK_MODEL || "deepseek-v4-flash";
+
+/**
+ * Split an internal model token (`<model>` / `<model>:thinking`, see models.ts)
+ * into DeepSeek v4 request params. `thinking` defaults to enabled server-side,
+ * so it must be sent explicitly on every call. Legacy names are mapped for
+ * stray env overrides (deepseek-chat/-reasoner retire on 2026-07-24).
+ */
+function resolveModel(token: string): { model: string; thinking: { type: "enabled" | "disabled" } } {
+  if (token === "deepseek-chat") return { model: "deepseek-v4-flash", thinking: { type: "disabled" } };
+  if (token === "deepseek-reasoner") return { model: "deepseek-v4-flash", thinking: { type: "enabled" } };
+  const thinking = token.endsWith(":thinking");
+  return { model: thinking ? token.slice(0, -":thinking".length) : token, thinking: { type: thinking ? "enabled" : "disabled" } };
+}
 
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
@@ -19,6 +32,14 @@ import { fetchReferences } from "./research";
 import { modelBadge, normalizeMode, stageModels, type GenerationMode } from "./models";
 import type { PipelineAttachment } from "./attachments";
 import { CONNECTORS } from "./connectors";
+import { buildProject, formatBuildErrors } from "./build";
+import {
+  concatSources,
+  mergeFiles,
+  parseFileStream,
+  validateFiles,
+  type ProjectFiles,
+} from "./projectFiles";
 
 export interface ResearchBrief {
   audience: string;
@@ -48,12 +69,13 @@ export interface FusionPlan {
 export type AgentEvent =
   | {
       type: "stage";
-      stage: "researcher" | "fusion" | "pm" | "architect" | "planner" | "engineer" | "reviewer" | "validator";
+      stage: "researcher" | "fusion" | "pm" | "architect" | "planner" | "engineer" | "build" | "reviewer" | "validator";
       status: "start" | "done";
       info?: string;
       model?: string;
     }
   | { type: "plan"; spec: AppSpec }
+  | { type: "files"; files: ProjectFiles }
   | { type: "fusion"; plan: FusionPlan }
   | { type: "pm"; stories: PmStories }
   | { type: "architect"; blueprint: string }
@@ -82,7 +104,7 @@ async function chat(messages: ChatMessage[], maxTokens = 4096, temperature = 0.3
   const res = await fetch(API_URL, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${apiKey()}` },
-    body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature }),
+    body: JSON.stringify({ ...resolveModel(model), messages, max_tokens: maxTokens, temperature }),
   });
   if (!res.ok) throw new Error(`LLM API ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const data = await res.json();
@@ -98,7 +120,7 @@ async function* chatStream(
   const res = await fetch(API_URL, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${apiKey()}` },
-    body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature, stream: true }),
+    body: JSON.stringify({ ...resolveModel(model), messages, max_tokens: maxTokens, temperature, stream: true }),
   });
   if (!res.ok || !res.body) {
     throw new Error(`LLM API ${res.status}: ${(await res.text()).slice(0, 300)}`);
@@ -160,6 +182,18 @@ const ENGINEER_RULES = `输出规则(必须严格遵守):
 6. 代码健壮:处理空状态(无数据时的引导提示)、非法输入,不允许出现未捕获异常。
 7. 界面语言与用户需求的语言一致。`;
 
+const ENGINEER_RULES_PROJECT = `输出规则(必须严格遵守):
+1. 以多文件工程形式输出。每个文件之前单独一行标记:===== FILE: 路径 =====,随后紧跟该文件的完整内容。不要输出 markdown 代码围栏,不要输出任何解释文字。
+2. 工程结构约定:入口 index.html(用 <script src="src/main.jsx"></script> 与 <link rel="stylesheet" href="styles.css"> 引用本地文件);React 代码放 src/ 下(.jsx/.tsx);文件总数 ≤6。
+3. 允许 import 的外部依赖仅限:react、react-dom/client(JSX 由构建器自动接 react/jsx-runtime)。其余依赖一律禁止;禁止任何外链资源(CDN/字体/图片 URL),图标用 emoji 或内联 SVG。
+4. index.html 只放结构与挂载点(如 <div id="root"></div>),不写内联业务 <script>/<style>——逻辑进 src/*.jsx,样式进 styles.css。
+5. 数据持久化:优先平台注入的 window.quark.storage(async get(key)/set(key,value),字符串值,发布后所有访客共享),不可用时回退 localStorage;两种访问都包 try/catch,失败时应用仍要能工作(内存态)。
+6. 应用必须具备真实交互;视觉现代精致、响应式;健壮处理空状态与非法输入,不允许未捕获异常。
+7. 界面语言与用户需求的语言一致。`;
+
+const ENGINEER_RULES_PROJECT_ITERATE = `
+本次是对既有工程的修改:只输出发生变化或新增的文件(每个文件依然输出完整内容),需要删除的文件输出一行 ===== DELETE: 路径 =====;未变化的文件一律不要输出。`;
+
 export interface PipelineInput {
   request: string;
   history: { role: "user" | "agent"; content: string }[];
@@ -179,6 +213,10 @@ export interface PipelineInput {
   acceptance?: string[] | null;
   /** 聚变: the two published source apps to merge (first generation only). */
   fusionSources?: { name: string; html: string; spec: string | null }[] | null;
+  /** 工程模式: multi-file source tree + esbuild pipeline instead of one HTML. */
+  engine?: "single" | "project";
+  /** Current version's source tree (project engine iterations). */
+  files?: ProjectFiles | null;
 }
 
 const ACCEPTANCE_ACTIONS = ["click", "type", "assertText", "assertExists", "assertNotExists"];
@@ -234,6 +272,42 @@ selector 必须是该 HTML 中真实存在的选择器(优先用 id)。每条标
   // Criteria the model dropped still show up — as untestable.
   for (let i = out.length; i < criteria.length; i++) out.push({ criterion: criteria[i], steps: [] });
   return out;
+}
+
+/**
+ * 工程模式的一轮修复:把问题描述交给 Engineer,只收变更文件,合并后重建。
+ * 产出无效/仍构建失败时返回 null(调用方保留原产物)。
+ */
+async function* projectFixRound(
+  files: ProjectFiles,
+  problem: string,
+  systemPrompt: string,
+  model: string
+): AsyncGenerator<AgentEvent, { files: ProjectFiles; html: string } | null> {
+  let raw = "";
+  yield { type: "code_reset" };
+  for await (const delta of chatStream(
+    [
+      { role: "system", content: `${systemPrompt}${ENGINEER_RULES_PROJECT_ITERATE}` },
+      {
+        role: "user",
+        content: `${problem}\n\n当前工程源码:\n${concatSources(files)}\n\n请修复上述问题:只输出需要修改/新增的文件(===== FILE: 路径 ===== + 完整内容),必要时用 ===== DELETE: 路径 =====。保持功能与视觉不变。`,
+      },
+    ],
+    8192,
+    0.2,
+    model
+  )) {
+    raw += delta;
+    yield { type: "code_delta", delta };
+  }
+  const parsed = parseFileStream(raw);
+  if (!Object.keys(parsed.files).length && !parsed.deletes.length) return null;
+  const merged = mergeFiles(files, parsed);
+  if (validateFiles(merged)) return null;
+  const built = await buildProject(merged);
+  if (!built.ok) return null;
+  return { files: merged, html: built.html! };
 }
 
 /** Attachment context shared by Planner and Engineer prompts. */
@@ -399,6 +473,8 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
     return;
   }
   const isIteration = !!input.currentHtml;
+  const isProject = input.engine === "project";
+  let files: ProjectFiles | null = isProject ? (input.files ?? null) : null;
   let spec: AppSpec | null = input.specJson ? (JSON.parse(input.specJson) as AppSpec) : null;
 
   // ---- Stage 1: Planner (first generation only) ----

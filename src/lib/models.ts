@@ -8,22 +8,28 @@ export interface ModelInfo {
   apiModel: string;
 }
 
+/**
+ * Internal model tokens: `<api-model>` = non-thinking, `<api-model>:thinking` =
+ * thinking mode. The API layer (agent.ts resolveModel) splits the token into the
+ * request's `model` + `thinking` params — DeepSeek v4 selects reasoning via the
+ * `thinking` parameter on a single model name, not separate model names.
+ */
 export const MODELS: ModelInfo[] = [
-  { id: "chat", badge: "V3", name: "DeepSeek V3 · 对话", apiModel: "deepseek-chat" },
-  { id: "reasoner", badge: "R1", name: "DeepSeek R1 · 推理", apiModel: "deepseek-reasoner" },
+  { id: "chat", badge: "V4", name: "DeepSeek V4 Flash · 非思考", apiModel: "deepseek-v4-flash" },
+  { id: "reasoner", badge: "V4思考", name: "DeepSeek V4 Flash · 思考", apiModel: "deepseek-v4-flash:thinking" },
 ];
 
 export type GenerationMode = "fast" | "mixed" | "deep";
 export const MODES: { id: GenerationMode; label: string; desc: string }[] = [
-  { id: "fast", label: "⚡ 快速", desc: "全阶段 DeepSeek V3:最快,日常迭代首选" },
-  { id: "mixed", label: "🧠 混合", desc: "R1 负责研究/规划/评审(想得深),V3 负责编码(写得快)" },
-  { id: "deep", label: "🐢 深度", desc: "全阶段 R1:最强推理,速度最慢" },
+  { id: "fast", label: "⚡ 快速", desc: "全阶段 V4 非思考:最快,日常迭代首选" },
+  { id: "mixed", label: "🧠 混合", desc: "思考模式负责研究/规划/评审,非思考负责编码(写得快)" },
+  { id: "deep", label: "🐢 深度", desc: "全阶段思考模式:最强推理,速度最慢" },
 ];
 
 export type PipelineStage = "researcher" | "pm" | "architect" | "planner" | "engineer" | "reviewer";
 
-const CHAT = "deepseek-chat";
-const REASONER = "deepseek-reasoner";
+const CHAT = "deepseek-v4-flash";
+const REASONER = "deepseek-v4-flash:thinking";
 
 export function normalizeMode(mode: unknown): GenerationMode {
   return mode === "mixed" || mode === "deep" ? mode : "fast";

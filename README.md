@@ -83,11 +83,13 @@ flowchart LR
 
 | 模式 | Researcher/Planner/Reviewer | Engineer(流式编码) | 适用 |
 |---|---|---|---|
-| ⚡ 快速(默认) | DeepSeek V3 | DeepSeek V3 | 日常迭代,最快 |
-| 🧠 混合 | **DeepSeek R1**(深思考) | DeepSeek V3(写得快) | 复杂需求首次生成,思考与速度兼得 |
-| 🐢 深度 | DeepSeek R1 | DeepSeek R1 | 最强推理,最慢 |
+| ⚡ 快速(默认) | V4 Flash 非思考 | V4 Flash 非思考 | 日常迭代,最快 |
+| 🧠 混合 | V4 Flash **思考模式** | V4 Flash 非思考(写得快) | 复杂需求首次生成,思考与速度兼得 |
+| 🐢 深度 | V4 Flash 思考模式 | V4 Flash 思考模式 | 最强推理,最慢 |
 
-模型注册表(`src/lib/models.ts`)结构化预留扩展位;R1 的思考过程(reasoning_content)不进入产物。
+底层为 DeepSeek V4 Flash 单模型,思考/非思考经 `thinking` 请求参数切换(2026-07-24 起
+`deepseek-chat`/`deepseek-reasoner` 旧名弃用,已完成迁移并保留旧名兼容映射);模型注册表
+(`src/lib/models.ts`)结构化预留扩展位;思考过程(reasoning_content)不进入产物。
 构建完成自动切换预览;若停留在代码页会出现「✓ 新版本已生成 → 查看预览」,移动端「应用」tab 显示完成绿点。
 
 ## 附件 · 深度研究 · 主题变换
