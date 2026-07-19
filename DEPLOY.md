@@ -98,3 +98,14 @@ S3 部署/模板资源功能需要 AWS 凭证链(compose 环境变量或挂载 ~
 - 运维:`ssh ... 'sudo systemctl status|restart fusion-speech'`;日志 `sudo journalctl -u fusion-speech -n 50`;
   换模型改 `/etc/fusion-speech.env` 的 `WHISPER_MODEL`(如 large-v3-turbo,需评估 CPU 时延或迁 GPU)后重启
 - 平台侧:未配置 `SPEECH_SERVICE_URL` 时接口返回 503「语音服务未启用」;测试/CI 用 `SPEECH_MOCK=1`
+
+## 边缘代理与麦克风权限(2026-07-19)
+
+- 语音输入曾被 `~/edge-proxy/Caddyfile` 的全局安全头 `Permissions-Policy: microphone=()`
+  站点级禁用(不弹授权直接 NotAllowedError)。已在 quark.lexarcai.com 站点块**内联**安全头
+  并放开 `microphone=(self)`(不再 import sec_common:其块含 `-Server` 删除操作导致整块
+  defer,后写的覆盖会被回盖);其他域与 quark-apps 应用域保持全禁
+- 运维坑:edge-caddy 以**单文件 bind mount** 挂 Caddyfile —— 编辑必须原地写入(保 inode,
+  如 python open('w') / cp),用 rename 语义的编辑器(sed -i 等)会让容器停留在旧 inode,
+  需 `docker restart edge-caddy` 重挂;改完 `docker exec edge-caddy caddy reload --config /etc/caddy/Caddyfile`
+- 注意:~/edge-proxy 非 git 仓库,本变更以此文档为准
