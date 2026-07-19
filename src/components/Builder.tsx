@@ -38,10 +38,12 @@ interface ProjectDetail {
     goal_round: number;
     goal_rounds: number;
     goal_status: string | null;
+    engine: "single" | "project";
   };
   messages: Message[];
   versions: Version[];
   currentHtml: string | null;
+  currentFiles: Record<string, string> | null;
   attachments: AttachmentMeta[];
   deployments: Deployment[];
   deployTargets: DeployTarget[];
@@ -87,7 +89,7 @@ interface Spec {
   design: string;
 }
 
-type StageName = "researcher" | "fusion" | "pm" | "architect" | "planner" | "engineer" | "reviewer" | "validator";
+type StageName = "researcher" | "fusion" | "pm" | "architect" | "planner" | "engineer" | "build" | "reviewer" | "validator";
 type StageState = "idle" | "active" | "done";
 
 const STAGE_LABELS: Record<StageName, string> = {
@@ -96,7 +98,8 @@ const STAGE_LABELS: Record<StageName, string> = {
   pm: "PM · 产品",
   architect: "Architect · 架构",
   planner: "Planner · 规划",
-  engineer: "Engineer · 构建",
+  engineer: "Engineer · 编码",
+  build: "Build · 打包构建",
   reviewer: "Reviewer · 评审",
   validator: "Validator · 实测",
 };
@@ -108,6 +111,7 @@ const IDLE_STAGES: Record<StageName, { state: StageState; info?: string; model?:
   architect: { state: "idle" },
   planner: { state: "idle" },
   engineer: { state: "idle" },
+  build: { state: "idle" },
   reviewer: { state: "idle" },
   validator: { state: "idle" },
 };
@@ -147,6 +151,8 @@ export default function Builder({ projectId }: { projectId: string }) {
   const speech = useSpeech((text) => setInput((v) => (v ? `${v}${text}` : text)));
   const [genMode, setGenMode] = useState<"fast" | "mixed" | "deep">("fast");
   const [previewReady, setPreviewReady] = useState(false);
+  const [srcFiles, setSrcFiles] = useState<Record<string, string> | null>(null);
+  const [activeFile, setActiveFile] = useState<string | null>(null);
   const [pickMode, setPickMode] = useState(false);
   const [pickTarget, setPickTarget] = useState<{ selector: string; snippet: string; label: string } | null>(null);
   const [reports, setReports] = useState<AppReport[]>([]);
@@ -182,6 +188,8 @@ export default function Builder({ projectId }: { projectId: string }) {
     setDetail(data);
     setMessages(data.messages);
     setHtml(data.currentHtml);
+    setSrcFiles(data.currentFiles ?? null);
+    setActiveFile((f) => (f && data.currentFiles?.[f] !== undefined ? f : (data.currentFiles ? "index.html" : null)));
     setAttachments(data.attachments ?? []);
     return data;
   }, [projectId]);
@@ -279,6 +287,10 @@ export default function Builder({ projectId }: { projectId: string }) {
                 ...m,
                 { id: `tmp_fu_${Date.now()}`, role: "agent", content: JSON.stringify(event.plan), meta: "fusion" },
               ]);
+              break;
+            case "files":
+              setSrcFiles(event.files);
+              setActiveFile((f) => (f && event.files[f] !== undefined ? f : "index.html"));
               break;
             case "code_delta":
               setStreamCode((c) => c + event.delta);
@@ -792,6 +804,20 @@ export default function Builder({ projectId }: { projectId: string }) {
             ))}
           </select>
         )}
+        {project?.current_version_id && (
+          <a
+            href={`/api/projects/${projectId}/export`}
+            className="btn-ghost px-3 py-1.5 text-xs max-sm:hidden"
+            title={
+              detail?.project.engine === "project"
+                ? "导出工程 zip:源码 + package.json(vite),可本地继续真实开发;移动项目附 Capacitor 配置"
+                : "导出应用 zip:单文件 HTML + 说明"
+            }
+            download
+          >
+            📦 导出工程
+          </a>
+        )}
         {publishedUrl && (
           <>
             <button
@@ -1301,6 +1327,7 @@ export default function Builder({ projectId }: { projectId: string }) {
                     .filter((name) => {
                       if (name === "researcher") return stages.researcher.state !== "idle" || research;
                       if (name === "fusion") return stages.fusion.state !== "idle";
+                      if (name === "build") return stages.build.state !== "idle" || detail?.project.engine === "project";
                       if (name === "pm" || name === "architect") return stages[name].state !== "idle" || team;
                       if (name === "planner") return !team || stages.planner.state !== "idle";
                       return true;
@@ -1646,6 +1673,28 @@ export default function Builder({ projectId }: { projectId: string }) {
                   {generating ? "首个版本正在构建,可切到「代码」页观看实况" : "还没有版本。在左侧描述你的需求开始构建。"}
                 </div>
               )
+            ) : !generating && srcFiles ? (
+              <div className="h-full flex flex-col">
+                <div className="flex items-center gap-1 px-2 py-1.5 border-b border-line overflow-x-auto shrink-0">
+                  {Object.keys(srcFiles).map((p) => (
+                    <button
+                      key={p}
+                      className={`px-2.5 py-1 text-[11px] font-mono rounded-md whitespace-nowrap transition-colors ${
+                        activeFile === p ? "bg-accent-soft text-ink" : "text-muted hover:text-ink"
+                      }`}
+                      onClick={() => setActiveFile(p)}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                  <span className="ml-auto text-[10px] text-muted whitespace-nowrap px-2" title="工程模式:多文件源码,esbuild 构建为自包含产物">
+                    🏗 {Object.keys(srcFiles).length} 个源文件
+                  </span>
+                </div>
+                <pre className="code-stream flex-1 overflow-y-auto p-4">
+                  {activeFile ? srcFiles[activeFile] : "// 选择文件"}
+                </pre>
+              </div>
             ) : (
               <pre ref={codeRef} className="code-stream h-full overflow-y-auto p-4">
                 {streamCode || html || "// 暂无代码"}

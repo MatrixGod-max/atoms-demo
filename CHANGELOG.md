@@ -1,5 +1,29 @@
 # Changelog
 
+## v17 — 工程模式:多文件 React 工程 + 真实 code→build→fix 开发流程(2026-07-19)
+
+- 🏗 **产物升级为「文件树 + 构建产物」**:新项目默认工程模式(创建时可切回 ⚡ 单文件)——
+  多文件源码(index.html + src/*.jsx + styles.css 等,≤6 文件)、依赖白名单
+  (react/react-dom,平台内置 React 19)、服务端 **esbuild** 打包为自包含单 HTML
+  (`define NODE_ENV=production`,禁外链契约不变);`app_versions.html` 即构建产物,
+  预览/发布/制品/PWA/验收/部署整条下游零改动兼容,旧单文件版本天然兼容
+- 🔁 **真实开发循环可见**:Engineer 以 `===== FILE: 路径 =====` 协议流式产出多文件
+  (迭代只输出变更文件 + DELETE 标记,服务端合并);新增 **Build 阶段**——esbuild 构建失败时
+  把结构化错误(文件/行号)喂回 Engineer 回炉,最多 2 轮,时间线全程标注
+  (如「打包 4 个文件 → 96KB,含 1 轮修复」);Validator 运行时错误与验收失败的修复
+  也改为**源码级修复→重建→复验**
+- 🧠 LLM 输入全面切源码:工程模式下 Reviewer / 验收用例生成 / 目标评估 / 聚变分析
+  读可读源码而非压缩 bundle;Validator/验收仍真机执行构建产物
+- 🗂 **工作台代码页升级为文件树 tabs**;流水线新增 Build 阶段展示;首页「构建」菜单
+  加 🏗 工程模式 / ⚡ 单文件选择(默认工程);Remix/聚变继承源工程的 engine 与源树
+- 📦 **导出工程 zip**(零依赖自实现 zip writer):源码 + package.json + vite 配置 + README,
+  本地 `npm install && npm run dev` 即真实继续开发;移动项目附 **Capacitor 配置**与
+  打 APK 指引(云端不打原生包——边界如实);单文件项目导出 HTML + 说明
+- 计费:工程模式生成 +1 积分(含目标模式自动轮);模型侧同步迁移 DeepSeek v4-flash
+  (thinking 参数按档位显式控制,旧 deepseek-chat/reasoner 名称兼容映射)
+- 工程:esbuild 入 serverExternalPackages(next build 不内联原生二进制);
+  tests/v17.test.ts 14 例(构建器/协议/端到端/修复轮/zip/计费);smoke 新增工程模式全链路一步
+
 ## v15 — 登录注册完善:用户名/邮箱双通道(2026-07-19)
 
 - 注册支持**用户名、邮箱至少填一项**(均可后补空缺):用户名 2-20 位字母/数字/中文/

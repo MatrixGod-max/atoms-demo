@@ -1,6 +1,7 @@
 import { db, now } from "./db";
 import { newId } from "./auth";
 import { runPipeline, runGoalEval, type AgentEvent, type AppSpec, type GoalEvalResult } from "./agent";
+import { concatSources, parseStoredFiles, type ProjectFiles } from "./projectFiles";
 import { inlineImageAssets, loadPipelineAttachments } from "./attachments";
 import type { GenerationMode } from "./models";
 import { charge, generationCost, recordEvent } from "./credits";
@@ -192,15 +193,16 @@ class JobRunner {
     this.setStatus(job.id, "running");
     this.emit(job, { type: "job_state", status: "running" });
     try {
-      const project = db.prepare("SELECT current_version_id, platform, theme, connectors, goal, acceptance, fused_from FROM projects WHERE id = ?").get(job.projectId) as
-        | { current_version_id: string | null; platform: "web" | "mobile"; theme: string | null; connectors: string | null; goal: string | null; acceptance: string | null; fused_from: string | null }
+      const project = db.prepare("SELECT current_version_id, platform, theme, connectors, goal, acceptance, fused_from, engine FROM projects WHERE id = ?").get(job.projectId) as
+        | { current_version_id: string | null; platform: "web" | "mobile"; theme: string | null; connectors: string | null; goal: string | null; acceptance: string | null; fused_from: string | null; engine: "single" | "project" }
         | undefined;
       if (!project) throw new Error("项目已被删除");
       const currentVersion = project.current_version_id
-        ? (db.prepare("SELECT html, spec FROM app_versions WHERE id = ?").get(project.current_version_id) as
-            | { html: string; spec: string | null }
+        ? (db.prepare("SELECT html, spec, files FROM app_versions WHERE id = ?").get(project.current_version_id) as
+            | { html: string; spec: string | null; files: string | null }
             | undefined)
         : undefined;
+      const currentFiles = parseStoredFiles(currentVersion?.files);
 
       const attachments = loadPipelineAttachments(job.projectId);
       let acceptance: string[] | null = null;
@@ -219,12 +221,17 @@ class JobRunner {
               (f) =>
                 db
                   .prepare(
-                    `SELECT p.name, v.html, v.spec FROM projects p JOIN app_versions v ON v.id = p.published_version_id
+                    `SELECT p.name, v.html, v.spec, v.files FROM projects p JOIN app_versions v ON v.id = p.published_version_id
                      WHERE p.slug = ? AND p.published_version_id IS NOT NULL`
                   )
-                  .get(f.slug) as { name: string; html: string; spec: string | null } | undefined
+                  .get(f.slug) as { name: string; html: string; spec: string | null; files: string | null } | undefined
             )
-            .filter((r): r is { name: string; html: string; spec: string | null } => !!r);
+            .filter((r): r is { name: string; html: string; spec: string | null; files: string | null } => !!r)
+            // Project-engine sources: feed readable sources, not the minified bundle.
+            .map((r) => {
+              const srcFiles = parseStoredFiles(r.files);
+              return { name: r.name, html: srcFiles ? concatSources(srcFiles) : r.html, spec: r.spec };
+            });
           if (rows.length === 2) fusionSources = rows;
         } catch {
           fusionSources = null;
@@ -232,6 +239,7 @@ class JobRunner {
       }
       let spec: AppSpec | null = null;
       let producedHtml: string | null = null;
+      let producedFiles: ProjectFiles | null = null;
       for await (const event of runPipeline({
         request: job.prompt,
         history: job.history,
@@ -248,6 +256,8 @@ class JobRunner {
         goal: project.goal,
         acceptance,
         fusionSources,
+        engine: project.engine === "project" ? "project" : "single",
+        files: currentFiles,
       })) {
         if (event.type === "plan") spec = event.spec;
         if (event.type === "stage" && event.status === "start") {
@@ -297,6 +307,11 @@ class JobRunner {
           this.emit(job, event);
           continue;
         }
+        if (event.type === "files") {
+          producedFiles = event.files;
+          this.emit(job, event);
+          continue;
+        }
         if (event.type === "html") {
           const finalHtml = inlineImageAssets(event.html, attachments);
           const versionId = newId("v");
@@ -306,8 +321,8 @@ class JobRunner {
             }).m ?? 0) + 1;
           const specJson = spec ? JSON.stringify(spec) : (currentVersion?.spec ?? null);
           db.prepare(
-            "INSERT INTO app_versions (id, project_id, num, html, spec, review_notes, prompt, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-          ).run(versionId, job.projectId, num, finalHtml, specJson, event.reviewNotes, job.prompt, now());
+            "INSERT INTO app_versions (id, project_id, num, html, spec, review_notes, prompt, files, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+          ).run(versionId, job.projectId, num, finalHtml, specJson, event.reviewNotes, job.prompt, producedFiles ? JSON.stringify(producedFiles) : null, now());
           db.prepare(
             "UPDATE projects SET current_version_id = ?, updated_at = ?, name = COALESCE(?, name) WHERE id = ?"
           ).run(versionId, now(), spec?.name ?? null, job.projectId);
@@ -326,7 +341,8 @@ class JobRunner {
         }
       }
       // Goal mode: evaluate this round and possibly chain the next one.
-      const next = await this.evaluateGoal(job, producedHtml);
+      // Project engine: judge readable sources, not the minified bundle.
+      const next = await this.evaluateGoal(job, producedFiles ? concatSources(producedFiles) : producedHtml);
       this.setStatus(job.id, "done");
       if (next) {
         try {
@@ -407,7 +423,8 @@ class JobRunner {
       this.endGoal(job, "cap", "🎯 已达今日生成次数上限,自动迭代结束");
       return null;
     }
-    const cost = generationCost(job.mode, job.research, job.team);
+    const engineRow = db.prepare("SELECT engine FROM projects WHERE id = ?").get(job.projectId) as { engine: string };
+    const cost = generationCost(job.mode, job.research, job.team, false, engineRow.engine === "project");
     if (!charge(job.userId, cost, `goal-round:${round + 1}`)) {
       this.endGoal(job, "no_credits", `🎯 积分不足(下一轮需 ${cost}),自动迭代结束`);
       return null;

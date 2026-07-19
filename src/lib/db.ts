@@ -167,6 +167,8 @@ function createDb(): DatabaseSync {
   ensureColumn(db, "projects", "goal_status", "goal_status TEXT");
   ensureColumn(db, "projects", "acceptance", "acceptance TEXT");
   ensureColumn(db, "projects", "fused_from", "fused_from TEXT");
+  ensureColumn(db, "projects", "engine", "engine TEXT NOT NULL DEFAULT 'single' CHECK (engine IN ('single','project'))");
+  ensureColumn(db, "app_versions", "files", "files TEXT");
   ensureColumn(db, "users", "username", "username TEXT");
   relaxUsersEmail(db);
   db.exec(

@@ -51,7 +51,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
   // 聚变首次生成走双源合并流水线,收 +2 附加费。
   const isFusion = !!project.fused_from && !project.current_version_id;
-  const cost = generationCost(normalizeMode(mode), research === true, team === true, isFusion);
+  const cost = generationCost(normalizeMode(mode), research === true, team === true, isFusion, project.engine === "project");
   if (!charge(user.id, cost, `generate:${normalizeMode(mode)}`)) {
     return NextResponse.json(
       { error: `积分不足(本次需 ${cost},余额 ${balance(user.id)})。点击顶部横幅领取免费积分。` },

@@ -32,6 +32,7 @@ export interface LaunchOptions {
   mode?: "fast" | "mixed" | "deep";
   connectors?: string[];
   goal?: string | null;
+  engine?: "single" | "project";
 }
 
 /** Base64-encodes a File without blowing the call stack on large buffers. */
@@ -57,7 +58,14 @@ export async function launchProject(
   const res = await fetch("/api/projects", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ prompt, platform, theme: opts.theme ?? null, connectors: opts.connectors ?? [], goal: opts.goal ?? null }),
+    body: JSON.stringify({
+      prompt,
+      platform,
+      theme: opts.theme ?? null,
+      connectors: opts.connectors ?? [],
+      goal: opts.goal ?? null,
+      engine: opts.engine ?? "project",
+    }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return { error: data.error || `创建失败 (${res.status})` };

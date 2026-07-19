@@ -327,6 +327,122 @@ function attachmentContext(attachments: PipelineAttachment[] | undefined): strin
   return `\n\n${parts.join("\n\n")}`;
 }
 
+const MOCK_PROJECT_FILES: ProjectFiles = {
+  "index.html": `<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mock 工程计数器</title><link rel="stylesheet" href="styles.css"></head>
+<body><div id="root"></div><script src="src/main.jsx"></script></body></html>
+`,
+  "src/main.jsx": `import { createRoot } from "react-dom/client";
+import { useState } from "react";
+function App() {
+  const [n, setN] = useState(0);
+  return (
+    <main>
+      <h1 id="n">{n}</h1>
+      <button id="b" onClick={() => setN(n + 1)}>+1</button>
+    </main>
+  );
+}
+createRoot(document.getElementById("root")).render(<App />);
+`,
+  "styles.css": `body{font-family:sans-serif;display:flex;justify-content:center;padding-top:40px}
+button{font-size:20px;padding:8px 24px}
+`,
+};
+
+/** 工程模式 mock:流式输出 FILE 协议 → 真实 esbuild 构建 → 校验/验收,覆盖完整开发循环。 */
+async function* runMockProjectPipeline(input: PipelineInput): AsyncGenerator<AgentEvent> {
+  const isIteration = !!input.currentHtml;
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const sm = stageModels(normalizeMode(input.mode));
+  const buildBroken = input.request.includes("MOCK_BUILD_BROKEN");
+
+  if (!isIteration) {
+    yield { type: "stage", stage: "planner", status: "start", model: modelBadge(sm.planner) };
+    await sleep(30);
+    const spec: AppSpec = { name: "Mock 工程计数器", summary: "多文件 React mock", features: ["点击 +1"], design: "极简" };
+    yield { type: "plan", spec };
+    yield { type: "stage", stage: "planner", status: "done", info: spec.name };
+  }
+
+  yield { type: "stage", stage: "engineer", status: "start", model: modelBadge(sm.engineer) };
+  let files: ProjectFiles;
+  if (isIteration && input.files) {
+    // Iteration: emit only one changed file, exercising the merge path.
+    const changed = `${input.files["styles.css"] ?? ""}/* mock-iterated */\n`;
+    const stream = `===== FILE: styles.css =====\n${changed}`;
+    for (let i = 0; i < stream.length; i += 120) {
+      await sleep(10);
+      yield { type: "code_delta", delta: stream.slice(i, i + 120) };
+    }
+    files = mergeFiles(input.files, parseFileStream(stream));
+  } else {
+    const tree: ProjectFiles = { ...MOCK_PROJECT_FILES };
+    if (buildBroken) tree["src/main.jsx"] = `const broken = {;\n${tree["src/main.jsx"]}`;
+    const stream = Object.entries(tree)
+      .map(([p, c]) => `===== FILE: ${p} =====\n${c}`)
+      .join("");
+    for (let i = 0; i < stream.length; i += 200) {
+      await sleep(10);
+      yield { type: "code_delta", delta: stream.slice(i, i + 200) };
+    }
+    files = parseFileStream(stream).files;
+  }
+  const invalid = validateFiles(files);
+  if (invalid) throw new Error(`mock 工程无效:${invalid}`);
+  yield { type: "stage", stage: "engineer", status: "done", info: `${Object.keys(files).length} 个文件` };
+
+  yield { type: "stage", stage: "build", status: "start" };
+  let built = await buildProject(files);
+  let repairRounds = 0;
+  if (!built.ok && buildBroken) {
+    // Deterministic "repair": drop the injected syntax error, like the real loop would.
+    repairRounds = 1;
+    yield { type: "stage", stage: "build", status: "start", info: `${built.errors!.length} 个构建错误,回炉修复(第 1 轮)` };
+    files = { ...files, "src/main.jsx": files["src/main.jsx"].replace(/^const broken = \{;\n/, "") };
+    built = await buildProject(files);
+  }
+  if (!built.ok) throw new Error(`mock 构建失败:${formatBuildErrors(built.errors!)}`);
+  const html = built.html!;
+  yield {
+    type: "stage",
+    stage: "build",
+    status: "done",
+    info: `打包 ${built.meta.files} 个文件 → ${Math.round(built.meta.bundleBytes / 1024)}KB${repairRounds ? `,含 ${repairRounds} 轮修复` : ""}`,
+  };
+
+  yield { type: "stage", stage: "reviewer", status: "start", model: modelBadge(sm.reviewer) };
+  await sleep(30);
+  yield { type: "stage", stage: "reviewer", status: "done", info: "mock 评审通过" };
+
+  yield { type: "stage", stage: "validator", status: "start" };
+  let validatorNotes = "运行通过,无报错";
+  const v1 = await validateHtml(html, input.platform);
+  if (v1.skipped) validatorNotes = "校验环境不可用,跳过";
+  else if (!v1.ok) validatorNotes = `存在 ${v1.errors.length} 个运行时错误`;
+  const mockCriteria = input.acceptance?.length ? input.acceptance : input.team ? ["点击后数字+1"] : [];
+  if (mockCriteria.length) {
+    const ar = await runAcceptance(html, input.platform, [
+      {
+        criterion: mockCriteria[0],
+        steps: [
+          { action: "click", selector: "#b" },
+          { action: "assertText", selector: "#n", contains: "1" },
+        ],
+      },
+    ]);
+    if (ar.skipped) validatorNotes += ";验收环境不可用,跳过";
+    else {
+      yield { type: "acceptance", results: ar.results };
+      validatorNotes += `;验收 ${ar.results.filter((r) => r.pass).length}/${ar.results.length} 通过`;
+    }
+  }
+  yield { type: "stage", stage: "validator", status: "done", info: validatorNotes };
+  yield { type: "files", files };
+  yield { type: "html", html, reviewNotes: `mock 评审通过;${validatorNotes}` };
+  yield { type: "agent_message", content: isIteration ? "mock 工程迭代完成" : "「Mock 工程计数器」已生成" };
+}
+
 /** Deterministic, LLM-free pipeline for tests/CI (AGENT_MOCK=1). */
 async function* runMockPipeline(input: PipelineInput): AsyncGenerator<AgentEvent> {
   const isIteration = !!input.currentHtml;
@@ -469,7 +585,8 @@ ${broken ? "<script>throw new Error('mock runtime failure')<\/script>" : ""}
 
 export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEvent> {
   if (process.env.AGENT_MOCK === "1") {
-    yield* runMockPipeline(input);
+    if (input.engine === "project") yield* runMockProjectPipeline(input);
+    else yield* runMockPipeline(input);
     return;
   }
   const isIteration = !!input.currentHtml;
@@ -637,10 +754,13 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
 
   // ---- Stage 2: Engineer (streamed) ----
   yield { type: "stage", stage: "engineer", status: "start", model: modelBadge(sm.engineer) };
+  const engineerSystemBase = `你是 Quark 平台的工程师智能体(Engineer),负责把产品需求实现为${
+    isProject ? `多文件 React 工程(${isMobile ? "移动" : "网页"}应用)` : `单文件${isMobile ? "移动" : "网页"}应用`
+  }。\n${isProject ? ENGINEER_RULES_PROJECT : ENGINEER_RULES}`;
   const engineerMessages: ChatMessage[] = [
     {
       role: "system",
-      content: `你是 Quark 平台的工程师智能体(Engineer),负责把产品需求实现为单文件${isMobile ? "移动" : "网页"}应用。\n${ENGINEER_RULES}${isMobile ? ENGINEER_RULES_MOBILE_EXTRA : ""}${
+      content: `${engineerSystemBase}${isMobile ? ENGINEER_RULES_MOBILE_EXTRA : ""}${
         input.theme
           ? `\n【主题规范】本项目的视觉主题固定为「${input.theme}」:配色、字体气质、圆角、阴影与背景必须符合该主题,且在后续所有修改中保持一致。`
           : ""
@@ -665,22 +785,27 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
       : "";
     engineerMessages.push({
       role: "user",
-      content: `这是当前应用的完整代码:\n\n${input.currentHtml}\n\n最近的对话:\n${recent}\n\n用户的新需求: ${input.request}${
-        blueprint ? `\n\n架构师的变更蓝图(请遵循):\n${blueprint}` : ""
-      }${targetContext}${attContext}\n\n请在保留现有功能与风格的基础上完成修改,输出修改后的完整 HTML 文件。`,
+      content:
+        isProject && files
+          ? `这是当前工程的完整源码:\n\n${concatSources(files)}\n\n最近的对话:\n${recent}\n\n用户的新需求: ${input.request}${
+              blueprint ? `\n\n架构师的变更蓝图(请遵循):\n${blueprint}` : ""
+            }${targetContext}${attContext}\n\n请在保留现有功能与风格的基础上完成修改。${ENGINEER_RULES_PROJECT_ITERATE}`
+          : `这是当前应用的完整代码:\n\n${input.currentHtml}\n\n最近的对话:\n${recent}\n\n用户的新需求: ${input.request}${
+              blueprint ? `\n\n架构师的变更蓝图(请遵循):\n${blueprint}` : ""
+            }${targetContext}${attContext}\n\n请在保留现有功能与风格的基础上完成修改,输出修改后的完整 HTML 文件。`,
     });
   } else if (fusionPlan && input.fusionSources?.length === 2) {
     const [a, b] = input.fusionSources;
     engineerMessages.push({
       role: "user",
-      content: `聚变任务:把两个现有应用融合为一个全新的单文件应用。\n\n【应用 A「${a.name}」完整代码】\n${a.html.slice(0, 12_000)}\n\n【应用 B「${b.name}」完整代码】\n${b.html.slice(0, 12_000)}\n\n【聚变蓝图(请遵循)】\n${JSON.stringify(fusionPlan, null, 2)}\n\n用户需求:${input.request}${goalContext}${attContext}\n\n要求:产出的是重新设计的统一应用,不是两份代码的拼接 —— 统一信息架构、状态结构与视觉体系,融合两者核心能力。输出完整 HTML 文件。`,
+      content: `聚变任务:把两个现有应用融合为一个全新的${isProject ? "多文件 React 工程" : "单文件应用"}。\n\n【应用 A「${a.name}」完整代码】\n${a.html.slice(0, 12_000)}\n\n【应用 B「${b.name}」完整代码】\n${b.html.slice(0, 12_000)}\n\n【聚变蓝图(请遵循)】\n${JSON.stringify(fusionPlan, null, 2)}\n\n用户需求:${input.request}${goalContext}${attContext}\n\n要求:产出的是重新设计的统一应用,不是两份代码的拼接 —— 统一信息架构、状态结构与视觉体系,融合两者核心能力。${isProject ? "按工程规范输出全部文件。" : "输出完整 HTML 文件。"}`,
     });
   } else {
     engineerMessages.push({
       role: "user",
       content: pmOut
-        ? `PM 需求单:\n${JSON.stringify(pmOut, null, 2)}\n\n架构师蓝图(请遵循):\n${blueprint}\n\n用户原始需求: ${input.request}${goalContext}${attContext}\n\n请实现这个应用。`
-        : `产品规格:\n${JSON.stringify(spec, null, 2)}\n\n用户原始需求: ${input.request}${goalContext}${attContext}\n\n请实现这个应用。`,
+        ? `PM 需求单:\n${JSON.stringify(pmOut, null, 2)}\n\n架构师蓝图(请遵循):\n${blueprint}\n\n用户原始需求: ${input.request}${goalContext}${attContext}\n\n请实现这个应用。${isProject ? "按工程规范输出全部文件。" : ""}`
+        : `产品规格:\n${JSON.stringify(spec, null, 2)}\n\n用户原始需求: ${input.request}${goalContext}${attContext}\n\n请实现这个应用。${isProject ? "按工程规范输出全部文件。" : ""}`,
     });
   }
 
@@ -689,13 +814,76 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
     html += delta;
     yield { type: "code_delta", delta };
   }
-  html = stripFences(html);
-  if (!/^<!DOCTYPE html>/i.test(html) || html.length < 500) {
-    throw new Error("Engineer 产出无效(不是完整 HTML)");
-  }
-  yield { type: "stage", stage: "engineer", status: "done", info: `${html.length} 字符` };
+  if (isProject) {
+    // ---- 工程模式: parse the multi-file stream, then the real build stage ----
+    const parsed = parseFileStream(html);
+    files = isIteration && files ? mergeFiles(files, parsed) : parsed.files;
+    const invalid = validateFiles(files);
+    if (invalid) throw new Error(`Engineer 产出的工程无效:${invalid}`);
+    yield {
+      type: "stage",
+      stage: "engineer",
+      status: "done",
+      info: `${Object.keys(parsed.files).length} 个文件${parsed.deletes.length ? `,删除 ${parsed.deletes.length}` : ""}`,
+    };
 
-  // ---- Stage 3: Reviewer ----
+    yield { type: "stage", stage: "build", status: "start" };
+    let built = await buildProject(files);
+    let repairRounds = 0;
+    while (!built.ok && repairRounds < 2) {
+      repairRounds++;
+      yield {
+        type: "stage",
+        stage: "build",
+        status: "start",
+        info: `${built.errors!.length} 个构建错误,回炉修复(第 ${repairRounds} 轮)`,
+        model: modelBadge(sm.engineer),
+      };
+      let fixRaw = "";
+      yield { type: "code_reset" };
+      for await (const delta of chatStream(
+        [
+          { role: "system", content: `${engineerSystemBase}${ENGINEER_RULES_PROJECT_ITERATE}` },
+          {
+            role: "user",
+            content: `工程构建失败,esbuild 报错如下:\n${formatBuildErrors(built.errors!)}\n\n当前工程源码:\n${concatSources(files)}\n\n请修复构建错误:只输出需要修改的文件(===== FILE: 路径 ===== + 完整内容)。`,
+          },
+        ],
+        8192,
+        0.2,
+        sm.engineer
+      )) {
+        fixRaw += delta;
+        yield { type: "code_delta", delta };
+      }
+      const fixParsed = parseFileStream(fixRaw);
+      if (Object.keys(fixParsed.files).length || fixParsed.deletes.length) {
+        const mergedFix = mergeFiles(files, fixParsed);
+        if (!validateFiles(mergedFix)) files = mergedFix;
+      }
+      built = await buildProject(files);
+    }
+    if (!built.ok) {
+      throw new Error(`构建失败(已修复 ${repairRounds} 轮):${formatBuildErrors(built.errors!).slice(0, 400)}`);
+    }
+    html = built.html!;
+    yield {
+      type: "stage",
+      stage: "build",
+      status: "done",
+      info: `打包 ${built.meta.files} 个文件 → ${Math.round(built.meta.bundleBytes / 1024)}KB${
+        repairRounds ? `,含 ${repairRounds} 轮修复` : ""
+      }`,
+    };
+  } else {
+    html = stripFences(html);
+    if (!/^<!DOCTYPE html>/i.test(html) || html.length < 500) {
+      throw new Error("Engineer 产出无效(不是完整 HTML)");
+    }
+    yield { type: "stage", stage: "engineer", status: "done", info: `${html.length} 字符` };
+  }
+
+  // ---- Stage 3: Reviewer(工程模式评审源码,结论仅记录;单文件模式可直接产出修正)----
   yield { type: "stage", stage: "reviewer", status: "start", model: modelBadge(sm.reviewer) };
   let reviewNotes = "";
   try {
@@ -703,22 +891,31 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
       [
         {
           role: "system",
-          content: `你是 Quark 平台的评审智能体(Reviewer)。检查一个单文件 HTML 应用:是否有明显 JS 错误、是否引用了外部资源、交互是否完整、是否满足用户需求。
+          content: isProject
+            ? `你是 Quark 平台的评审智能体(Reviewer)。检查一个多文件 React 工程的源码:是否有明显逻辑错误、是否引用了白名单外依赖或外部资源、交互是否完整、是否满足用户需求。
+注意:window.quark.storage / window.quark.connectors 是平台在发布环境注入的合法 API(代码已做存在性判断与 localStorage 回退),不算违规依赖。
+输出格式严格如下(只输出两行):
+第一行: VERDICT: pass 或 VERDICT: fix
+第二行: NOTES: 一句话结论(与用户语言一致,若 fix 需点明问题所在文件)`
+            : `你是 Quark 平台的评审智能体(Reviewer)。检查一个单文件 HTML 应用:是否有明显 JS 错误、是否引用了外部资源、交互是否完整、是否满足用户需求。
 输出格式严格如下:
 第一行: VERDICT: pass 或 VERDICT: fix
 第二行: NOTES: 一句话结论(与用户语言一致)
 若为 fix,则从第三行起输出修正后的完整 HTML 文件(不要 markdown 围栏)。仅在存在会导致功能不可用的问题时才选择 fix。`,
         },
-        { role: "user", content: `用户需求: ${input.request}\n\n待评审代码:\n\n${html}` },
+        {
+          role: "user",
+          content: `用户需求: ${input.request}\n\n待评审代码:\n\n${isProject && files ? concatSources(files) : html}`,
+        },
       ],
-      8192,
+      isProject ? 1024 : 8192,
       0.1,
       sm.reviewer
     );
     const verdictMatch = review.match(/VERDICT:\s*(pass|fix)/i);
     const notesMatch = review.match(/NOTES:\s*(.+)/);
     reviewNotes = notesMatch?.[1]?.trim() || "评审通过";
-    if (verdictMatch?.[1]?.toLowerCase() === "fix") {
+    if (!isProject && verdictMatch?.[1]?.toLowerCase() === "fix") {
       const idx = review.indexOf("<!DOCTYPE");
       if (idx !== -1) {
         const fixed = stripFences(review.slice(idx));
@@ -741,6 +938,28 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
     validatorNotes = "校验环境不可用,跳过";
   } else if (v1.ok) {
     validatorNotes = "运行通过,无报错";
+  } else if (isProject && files) {
+    const fix = yield* projectFixRound(
+      files,
+      `工程构建产物在真实浏览器中运行时出现了错误:\n${v1.errors.map((e) => `- ${e}`).join("\n")}`,
+      engineerSystemBase,
+      sm.engineer
+    );
+    if (fix) {
+      const v2 = await validateHtml(fix.html, input.platform);
+      if (v2.skipped || v2.ok || v2.errors.length < v1.errors.length) {
+        files = fix.files;
+        html = fix.html;
+        validatorNotes = `捕获 ${v1.errors.length} 个运行时错误并修复源码,复验${v2.ok || v2.skipped ? "通过" : `余 ${v2.errors.length} 项`}`;
+      } else {
+        validatorNotes = `修复未生效,保留原产物(${v1.errors.length} 个运行时错误)`;
+      }
+    } else {
+      validatorNotes = `修复产出无效,保留原产物(${v1.errors.length} 个运行时错误)`;
+    }
+    // Leave the code pane showing the final source tree, not the fix fragment.
+    yield { type: "code_reset" };
+    yield { type: "code_delta", delta: concatSources(files) };
   } else {
     let fixed = "";
     yield { type: "code_reset" };
@@ -789,7 +1008,7 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
   if (criteria.length) {
     let acceptanceNote: string;
     try {
-      const cases = await buildAcceptanceCases(html, criteria, sm.reviewer);
+      const cases = await buildAcceptanceCases(isProject && files ? concatSources(files) : html, criteria, sm.reviewer);
       const first = await runAcceptance(html, input.platform, cases);
       if (first.skipped) {
         acceptanceNote = "验收环境不可用,跳过";
@@ -797,7 +1016,30 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
         let results = first.results;
         let repaired = false;
         const failed = results.filter((r) => !r.pass && !r.skipped);
-        if (failed.length) {
+        if (failed.length && isProject && files) {
+          // One source-level repair round, rebuild, then re-test with the same cases.
+          const fix = yield* projectFixRound(
+            files,
+            `自动化验收测试未通过以下标准:\n${failed.map((f) => `- ${f.criterion}(${f.note ?? "未通过"})`).join("\n")}\n修改时保持已通过的功能与现有元素的 id/class 不变。`,
+            engineerSystemBase,
+            sm.engineer
+          );
+          if (fix) {
+            const rv = await validateHtml(fix.html, input.platform);
+            if (rv.skipped || rv.ok) {
+              const rerun = await runAcceptance(fix.html, input.platform, cases);
+              const failCount = (rs: AcceptanceOutcome[]) => rs.filter((r) => !r.pass && !r.skipped).length;
+              if (!rerun.skipped && failCount(rerun.results) < failed.length) {
+                files = fix.files;
+                html = fix.html;
+                results = rerun.results;
+                repaired = true;
+              }
+            }
+          }
+          yield { type: "code_reset" };
+          yield { type: "code_delta", delta: concatSources(files) };
+        } else if (failed.length) {
           // One repair round driven by the failing criteria, then re-test with the same cases.
           let fixed = "";
           yield { type: "code_reset" };
@@ -857,6 +1099,7 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
   yield { type: "stage", stage: "validator", status: "done", info: validatorNotes };
   reviewNotes = reviewNotes ? `${reviewNotes};${validatorNotes}` : validatorNotes;
 
+  if (isProject && files) yield { type: "files", files };
   yield { type: "html", html, reviewNotes };
   yield {
     type: "agent_message",

@@ -8,6 +8,7 @@ import { listAttachments } from "@/lib/attachments";
 import { listDeployments, DEPLOY_TARGETS } from "@/lib/deploy";
 import { validateDomainName } from "@/lib/domains";
 import { CONNECTORS } from "@/lib/connectors";
+import { parseStoredFiles } from "@/lib/projectFiles";
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const user = await getUser();
@@ -23,8 +24,8 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     .prepare("SELECT id, num, review_notes, prompt, created_at, LENGTH(html) AS size FROM app_versions WHERE project_id = ? ORDER BY num")
     .all(id);
   const current = project.current_version_id
-    ? (db.prepare("SELECT html FROM app_versions WHERE id = ?").get(project.current_version_id) as
-        | { html: string }
+    ? (db.prepare("SELECT html, files FROM app_versions WHERE id = ?").get(project.current_version_id) as
+        | { html: string; files: string | null }
         | undefined)
     : undefined;
 
@@ -34,6 +35,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     messages,
     versions,
     currentHtml: current?.html ?? null,
+    currentFiles: parseStoredFiles(current?.files),
     attachments: listAttachments(id),
     deployments: listDeployments(id),
     deployTargets: DEPLOY_TARGETS,

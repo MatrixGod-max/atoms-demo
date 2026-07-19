@@ -43,6 +43,7 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
   const router = useRouter();
   const [prompt, setPrompt] = useState("");
   const [platform, setPlatform] = useState<"web" | "mobile">("web");
+  const [engine, setEngine] = useState<"single" | "project">("project");
   const [research, setResearch] = useState(false);
   const [theme, setTheme] = useState<string | null>(null);
   const [connectors, setConnectors] = useState<string[]>([]);
@@ -102,12 +103,12 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
     closeMenus();
     const goal = goalMode ? goalText.trim() || trimmed : null;
     if (!loggedIn) {
-      sessionStorage.setItem("quark_boot", JSON.stringify({ prompt: trimmed, platform, research, team: teamMode, theme, mode: genMode, connectors, goal }));
+      sessionStorage.setItem("quark_boot", JSON.stringify({ prompt: trimmed, platform, research, team: teamMode, theme, mode: genMode, connectors, goal, engine }));
       router.push("/register?next=launch");
       return;
     }
     setBusy(true);
-    const result = await launchProject(trimmed, platform, { research, team: teamMode, theme, mode: genMode, connectors, goal });
+    const result = await launchProject(trimmed, platform, { research, team: teamMode, theme, mode: genMode, connectors, goal, engine });
     if ("error" in result) {
       setError(result.error);
       setBusy(false);
@@ -326,20 +327,35 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
                   setBuildOpen(!buildOpen);
                 }}
               >
-                <span>{platform === "web" ? "构建" : "📱 构建"}</span>
+                <span>{platform === "web" ? (engine === "project" ? "🏗 构建" : "构建") : "📱 构建"}</span>
                 <span className="text-[10px] text-muted">▾</span>
               </button>
               {buildOpen && (
-                <div className="absolute right-0 top-11 w-44 card rounded-xl p-1.5 shadow-lg z-30">
+                <div className="absolute right-0 top-11 w-56 card rounded-xl p-1.5 shadow-lg z-30">
                   {(
                     [
                       ["web", "🌐 网页应用"],
                       ["mobile", "📱 移动应用"],
                     ] as const
                   ).map(([p, label]) => (
-                    <button key={p} type="button" className={menuItem} onClick={() => { setPlatform(p); setBuildOpen(false); }}>
+                    <button key={p} type="button" className={menuItem} onClick={() => { setPlatform(p); }}>
                       <span className="flex-1 text-left">{label}</span>
                       {platform === p && <span className="text-accent">✓</span>}
+                    </button>
+                  ))}
+                  <div className="border-t border-line my-1" />
+                  {(
+                    [
+                      ["project", "🏗 工程模式", "多文件 React 工程 + 真实构建流程(+1 积分)"],
+                      ["single", "⚡ 单文件", "单 HTML 产物,生成最快"],
+                    ] as const
+                  ).map(([e, label, desc]) => (
+                    <button key={e} type="button" className={menuItem} onClick={() => { setEngine(e); }}>
+                      <span className="flex-1 text-left">
+                        {label}
+                        <span className="block text-[11px] text-muted">{desc}</span>
+                      </span>
+                      {engine === e && <span className="text-accent">✓</span>}
                     </button>
                   ))}
                 </div>

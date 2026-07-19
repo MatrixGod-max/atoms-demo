@@ -16,6 +16,8 @@ export interface ProjectRow {
   goal_status: string | null;
   acceptance: string | null;
   fused_from: string | null;
+  engine: "single" | "project";
+  platform: "web" | "mobile";
 }
 
 export function ownedProject(userId: string, projectId: string): ProjectRow | undefined {

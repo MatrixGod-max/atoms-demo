@@ -110,8 +110,8 @@ step "mixed-mode generation carries per-stage model badges"
 XJOB=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects/$MPROJ/generate" \
   -H 'content-type: application/json' -d '{"prompt":"mock 模式测试","mode":"mixed"}' | sed -E 's/.*"jobId":"([^"]+)".*/\1/')
 XSTREAM=$(timeout 120 curl -fsS -N -b "$JAR" "$BASE_URL/api/jobs/$XJOB/stream")
-echo "$XSTREAM" | grep -q '"stage":"engineer","status":"start".*"model":"V3"' || fail "engineer should use V3 in mixed"
-echo "$XSTREAM" | grep -q '"stage":"reviewer","status":"start".*"model":"R1"' || fail "reviewer should use R1 in mixed"
+echo "$XSTREAM" | grep -q '"stage":"engineer","status":"start".*"model":"V4"' || fail "engineer should use V4 (non-thinking) in mixed"
+echo "$XSTREAM" | grep -q '"stage":"reviewer","status":"start".*"model":"V4思考"' || fail "reviewer should use V4思考 in mixed"
 
 step "team mode carries PM/Architect stages; platform switch persists; Fusion brand"
 YPROJ=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects" \
@@ -254,6 +254,28 @@ curl -fsS -b "$JAR" "$BASE_URL/api/projects/$FPROJ" | grep -q 'fused:' || fail "
 FCODE=$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -X POST "$BASE_URL/api/projects" \
   -H 'content-type: application/json' -d "{\"fuseSlugs\":[\"$SLUG\",\"$SLUG\"]}")
 [ "$FCODE" = "400" ] || fail "same-slug fusion should 400, got $FCODE"
+
+step "v17: 工程模式 — 多文件生成、构建产物、文件树、导出 zip(第五账号,生成限流 3 次/10 分)"
+curl -fsS -c "$JAR" -X POST "$BASE_URL/api/auth/register" \
+  -H 'content-type: application/json' \
+  -d "{\"email\":\"e-$EMAIL\",\"password\":\"Smoke2026ci\"}" | grep -q '"ok":true' || fail "register fifth account"
+EPROJ=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects" \
+  -H 'content-type: application/json' -d '{"prompt":"smoke 工程计数器","engine":"project"}' | sed -E 's/.*"id":"([^"]+)".*/\1/')
+[ -n "$EPROJ" ] || fail "create project-engine project"
+EJOB=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects/$EPROJ/generate" \
+  -H 'content-type: application/json' -d '{"prompt":"smoke 工程计数器"}' | sed -E 's/.*"jobId":"([^"]+)".*/\1/')
+[ -n "$EJOB" ] || fail "start project-engine job"
+ESTREAM=$(timeout 180 curl -fsS -N -b "$JAR" "$BASE_URL/api/jobs/$EJOB/stream")
+echo "$ESTREAM" | grep -q '"stage":"build"' || fail "no build stage in stream"
+echo "$ESTREAM" | grep -q '"type":"files"' || fail "no files event in stream"
+echo "$ESTREAM" | grep -q '"type":"version"' || fail "project-engine gen produced no version"
+EDETAIL=$(curl -fsS -b "$JAR" "$BASE_URL/api/projects/$EPROJ")
+echo "$EDETAIL" | grep -q '"engine":"project"' || fail "engine column missing"
+echo "$EDETAIL" | grep -q 'src/main.jsx' || fail "source tree missing from detail"
+EZIP=$(curl -fsS -b "$JAR" -o /tmp/quark-smoke-export.zip -w '%{http_code}' "$BASE_URL/api/projects/$EPROJ/export")
+[ "$EZIP" = "200" ] || fail "export should 200, got $EZIP"
+head -c 4 /tmp/quark-smoke-export.zip | od -An -tx1 | grep -q "50 4b 03 04" || fail "export is not a zip"
+rm -f /tmp/quark-smoke-export.zip
 
 step "unauthenticated dashboard access is redirected"
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/dashboard")

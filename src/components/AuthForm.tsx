@@ -77,6 +77,7 @@ function AuthFormInner({ mode }: { mode: "login" | "register" }) {
         let connectors: string[] = [];
         let mode: "fast" | "mixed" | "deep" = "fast";
         let goal: string | null = null;
+        let engine: "single" | "project" = "project";
         try {
           const parsed = JSON.parse(boot);
           if (parsed.prompt) {
@@ -88,11 +89,12 @@ function AuthFormInner({ mode }: { mode: "login" | "register" }) {
             if (Array.isArray(parsed.connectors)) connectors = parsed.connectors;
             if (parsed.mode === "mixed" || parsed.mode === "deep") mode = parsed.mode;
             if (typeof parsed.goal === "string" && parsed.goal.trim()) goal = parsed.goal;
+            if (parsed.engine === "single") engine = "single";
           }
         } catch {
           // legacy plain-string boot value
         }
-        const result = await launchProject(prompt, platform, { research, team, theme, connectors, mode, goal });
+        const result = await launchProject(prompt, platform, { research, team, theme, connectors, mode, goal, engine });
         if ("id" in result) {
           router.push(`/project/${result.id}`);
           return;
