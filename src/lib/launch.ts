@@ -27,6 +27,7 @@ export function precheckFile(file: File, existingCount: number): string | null {
 
 export interface LaunchOptions {
   research?: boolean;
+  team?: boolean;
   theme?: string | null;
 }
 
@@ -62,7 +63,7 @@ export async function launchProject(
     : prompt;
   sessionStorage.setItem(
     `quark_pending_${data.id}`,
-    JSON.stringify({ prompt: genPrompt, research: !!opts.research })
+    JSON.stringify({ prompt: genPrompt, research: !!opts.research, team: !!opts.team })
   );
   return { id: data.id };
 }

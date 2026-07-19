@@ -17,7 +17,7 @@ curl -fsS "$BASE_URL/api/health" | grep -q '"ok":true' || fail "health check"
 step "register $EMAIL"
 curl -fsS -c "$JAR" -X POST "$BASE_URL/api/auth/register" \
   -H 'content-type: application/json' \
-  -d "{\"email\":\"$EMAIL\",\"password\":\"smoke123\"}" | grep -q '"ok":true' || fail "register"
+  -d "{\"email\":\"$EMAIL\",\"password\":\"Smoke2026ci\"}" | grep -q '"ok":true' || fail "register"
 
 step "create project"
 PROJ=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects" \
@@ -83,7 +83,7 @@ echo "$TSTREAM" | grep -q '"num":2' || fail "theme switch should create v2"
 step "mobile project: PWA artifact (second account — generate quota is 3/10min per user)"
 curl -fsS -c "$JAR" -X POST "$BASE_URL/api/auth/register" \
   -H 'content-type: application/json' \
-  -d "{\"email\":\"m-$EMAIL\",\"password\":\"smoke123\"}" | grep -q '"ok":true' || fail "register second account"
+  -d "{\"email\":\"m-$EMAIL\",\"password\":\"Smoke2026ci\"}" | grep -q '"ok":true' || fail "register second account"
 MPROJ=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects" \
   -H 'content-type: application/json' -d '{"prompt":"smoke 移动应用","platform":"mobile"}' | sed -E 's/.*"id":"([^"]+)".*/\1/')
 MJOB=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects/$MPROJ/generate" \
@@ -110,6 +110,22 @@ XJOB=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects/$MPROJ/generate" \
 XSTREAM=$(timeout 120 curl -fsS -N -b "$JAR" "$BASE_URL/api/jobs/$XJOB/stream")
 echo "$XSTREAM" | grep -q '"stage":"engineer","status":"start".*"model":"V3"' || fail "engineer should use V3 in mixed"
 echo "$XSTREAM" | grep -q '"stage":"reviewer","status":"start".*"model":"R1"' || fail "reviewer should use R1 in mixed"
+
+step "team mode carries PM/Architect stages; platform switch persists; Fusion brand"
+YPROJ=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects" \
+  -H 'content-type: application/json' -d '{"prompt":"smoke 团队"}' | sed -E 's/.*"id":"([^"]+)".*/\1/')
+YJOB=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects/$YPROJ/generate" \
+  -H 'content-type: application/json' -d '{"prompt":"smoke 团队","team":true}' | sed -E 's/.*"jobId":"([^"]+)".*/\1/')
+YSTREAM=$(timeout 120 curl -fsS -N -b "$JAR" "$BASE_URL/api/jobs/$YJOB/stream")
+echo "$YSTREAM" | grep -q '"stage":"pm"' || fail "pm stage missing"
+echo "$YSTREAM" | grep -q '"stage":"architect"' || fail "architect stage missing"
+echo "$YSTREAM" | grep -q '"type":"pm"' || fail "pm card event missing"
+if echo "$YSTREAM" | grep -q '"stage":"planner"'; then fail "planner should be replaced in team mode"; fi
+curl -fsS -b "$JAR" -X PATCH "$BASE_URL/api/projects/$YPROJ" \
+  -H 'content-type: application/json' -d '{"platform":"mobile"}' | grep -q '"ok":true' || fail "platform patch"
+curl -fsS -b "$JAR" "$BASE_URL/api/projects/$YPROJ" | grep -q '"platform":"mobile"' || fail "platform switch persisted"
+LANDING=$(curl -fsS "$BASE_URL/")
+echo "$LANDING" | grep -q "Fusion" || fail "Fusion brand missing on landing"
 
 step "resources: templates listed, template quick-start, CORS preflight"
 TCOUNT=$(curl -fsS "$BASE_URL/api/templates" | grep -o '"id":"tpl_' | wc -l)

@@ -19,7 +19,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const project = ownedProject(user.id, id);
   if (!project) return NextResponse.json({ error: "项目不存在" }, { status: 404 });
 
-  const { prompt, research, mode } = await req.json().catch(() => ({}));
+  const { prompt, research, team, mode } = await req.json().catch(() => ({}));
   if (typeof prompt !== "string" || !prompt.trim()) {
     return NextResponse.json({ error: "请输入需求" }, { status: 400 });
   }
@@ -41,7 +41,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   }
 
   try {
-    const { jobId, position } = jobRunner.start(id, user.id, prompt.trim(), research === true, normalizeMode(mode));
+    const { jobId, position } = jobRunner.start(id, user.id, prompt.trim(), research === true, normalizeMode(mode), team === true);
     return NextResponse.json({ jobId, position });
   } catch (err) {
     const e = err as Error & { code?: number; jobId?: string };

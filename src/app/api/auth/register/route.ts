@@ -12,8 +12,8 @@ export async function POST(req: Request) {
   if (typeof email !== "string" || !/^\S+@\S+\.\S+$/.test(email)) {
     return NextResponse.json({ error: "邮箱格式不正确" }, { status: 400 });
   }
-  if (typeof password !== "string" || password.length < 6) {
-    return NextResponse.json({ error: "密码至少 6 位" }, { status: 400 });
+  if (typeof password !== "string" || password.length < 10 || !/[a-zA-Z]/.test(password) || !/[0-9]/.test(password)) {
+    return NextResponse.json({ error: "密码至少 10 位,且需同时包含字母和数字" }, { status: 400 });
   }
   const displayName = typeof name === "string" && name.trim() ? name.trim().slice(0, 40) : email.split("@")[0];
 

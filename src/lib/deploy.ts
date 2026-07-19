@@ -16,7 +16,7 @@ export interface DeployTargetInfo {
 }
 
 export const DEPLOY_TARGETS: DeployTargetInfo[] = [
-  { id: "local", name: "本机 · Atoms 托管", status: "available", note: "默认。发布即部署到 quark-apps 域,HTTPS + 云存储 + 制品体系" },
+  { id: "local", name: "本机 · Fusion 托管", status: "available", note: "默认。发布即部署到 quark-apps 域,HTTPS + 云存储 + 制品体系" },
   { id: "s3", name: "AWS S3 静态托管", status: "available", note: "专属 bucket + 网站端点(HTTP)。应用云存储经 CORS 继续可用" },
   { id: "netlify", name: "Netlify", status: "experimental", note: "使用你自己的 Personal Access Token,仅本次请求使用不存储" },
   { id: "vercel", name: "Vercel", status: "planned", note: "接口已预留" },

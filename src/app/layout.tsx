@@ -13,7 +13,7 @@ const jetbrains = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Atoms — 智能体驱动的应用生成平台",
+  title: "Fusion 聚变 — 智能体驱动的应用生成平台",
   description: "描述你的想法,让智能体团队为你规划、构建并发布一个可运行的网页或移动应用。",
 };
 

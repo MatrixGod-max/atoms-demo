@@ -63,7 +63,7 @@ export default async function ArtifactPage({ params }: { params: Promise<{ slug:
     <div className="flex-1 flex flex-col">
       <nav className="flex items-center justify-between px-6 py-4 max-w-4xl w-full mx-auto">
         <Link href="/" className="flex items-center gap-2 font-semibold tracking-wide">
-          <span className="text-accent text-xl">⚛</span> Atoms
+          <span className="text-accent text-xl">☀</span> Fusion
         </Link>
         <Link href="/resources" className="text-sm text-muted hover:text-ink">
           资源中心

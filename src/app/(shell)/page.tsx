@@ -30,7 +30,7 @@ export default async function Home() {
       )}
 
       <footer className="mt-auto border-t border-line py-5 text-center text-xs text-muted">
-        Atoms Demo · 灵感致敬{" "}
+        Fusion 聚变 · ROOT 笔试作品 · 灵感致敬{" "}
         <a href="https://atoms.dev" className="text-accent hover:underline" target="_blank" rel="noreferrer">
           atoms.dev
         </a>

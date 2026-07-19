@@ -30,6 +30,7 @@ interface LiveJob {
   userId: string;
   prompt: string;
   research: boolean;
+  team: boolean;
   mode: GenerationMode;
   history: { role: "user" | "agent"; content: string }[];
   buffer: string[];
@@ -69,7 +70,8 @@ class JobRunner {
     userId: string,
     prompt: string,
     research = false,
-    mode: GenerationMode = "fast"
+    mode: GenerationMode = "fast",
+    team = false
   ): { jobId: string; position: number } {
     const existing = this.activeJobForProject(projectId);
     if (existing) {
@@ -87,8 +89,8 @@ class JobRunner {
     const jobId = newId("j");
     const t = now();
     db.prepare(
-      "INSERT INTO jobs (id, project_id, user_id, prompt, status, mode, created_at, updated_at) VALUES (?, ?, ?, ?, 'queued', ?, ?, ?)"
-    ).run(jobId, projectId, userId, prompt, mode, t, t);
+      "INSERT INTO jobs (id, project_id, user_id, prompt, status, mode, team, created_at, updated_at) VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?)"
+    ).run(jobId, projectId, userId, prompt, mode, team ? 1 : 0, t, t);
     db.prepare("INSERT INTO messages (id, project_id, role, content, created_at) VALUES (?, ?, 'user', ?, ?)").run(
       newId("m"),
       projectId,
@@ -102,6 +104,7 @@ class JobRunner {
       userId,
       prompt,
       research,
+      team,
       mode,
       history,
       buffer: [],
@@ -190,12 +193,23 @@ class JobRunner {
         specJson: currentVersion?.spec ?? null,
         platform: project.platform === "mobile" ? "mobile" : "web",
         research: job.research,
+        team: job.team,
         attachments,
         mode: job.mode,
       })) {
         if (event.type === "plan") spec = event.spec;
         if (event.type === "stage" && event.status === "start") {
           this.setStatus(job.id, "running", { stage: event.stage });
+        }
+        if (event.type === "pm" || event.type === "architect") {
+          if (event.type === "pm") {
+            spec = { name: event.stories.name, summary: event.stories.summary, features: event.stories.stories.slice(0, 5), design: "" };
+          }
+          db.prepare(
+            "INSERT INTO messages (id, project_id, role, content, meta, created_at) VALUES (?, ?, 'agent', ?, ?, ?)"
+          ).run(newId("m"), job.projectId, JSON.stringify(event.type === "pm" ? event.stories : event.blueprint), event.type, now());
+          this.emit(job, event);
+          continue;
         }
         if (event.type === "research") {
           db.prepare(

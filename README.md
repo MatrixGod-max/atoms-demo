@@ -1,9 +1,10 @@
-# ⚛ Quark — 智能体驱动的应用生成平台
+# ☀ Fusion 聚变 — 智能体驱动的应用生成平台
 
-> ROOT / AI Native 全栈工程师笔试作品。万物由原子构成,原子由夸克构成 —— Quark 是 Atoms 的"基本粒子版":
-> 用一句话描述想法,由 Planner / Engineer / Reviewer / Validator 四个智能体协作,生成一个可运行、可迭代、可发布、可被 Remix 的网页应用。
+> ROOT / AI Native 全栈工程师笔试作品(对标 atoms.dev):用一句话描述想法,由智能体团队
+> (可选 PM / Architect / Researcher,加上 Planner / Engineer / Reviewer / Validator)协作,
+> 生成一个可运行、可迭代、可发布、可被 Remix 的网页或移动应用。
 
-**在线体验:<https://quark.lexarcai.com>**
+**在线体验链接与演示账号通过笔试文档单独提供**(生成消耗真实 LLM API 额度,不在公开页面展示)。
 
 | ![landing](docs/landing.png) | ![builder](docs/builder.png) |
 |---|---|
@@ -11,10 +12,10 @@
 
 ## 评审快速验收(3 分钟)
 
-1. **免登录**:打开 [展厅 /explore](https://quark.lexarcai.com/explore) —— 每个应用都是智能体生成并发布的,可直接打开体验(注意右下角 Remix 徽章)
-2. **看工作台**(免注册):演示账号 `demo@quark.dev / quark123`(只读),登录后可浏览示例项目的对话历史、智能体时间线产物、版本列表与预览
-3. **完整体验**:注册任意邮箱(无需验证)→ 首页输入一句话 → 观看 Planner→Engineer→Reviewer→Validator 流水线实况(约 1-2 分钟)→ 迭代 → 发布,或从展厅 Remix 一个现成应用改造
-4. **本地验证**:`npm test`(11 例)+ `AGENT_MOCK=1` 模式下 `bash scripts/smoke.sh` 零成本跑通全链路(见下文)
+1. **免登录**:打开在线站点的 资源中心 `/resources` —— 「发现」里的每个应用都是智能体生成并发布的,可直接打开体验(注意右下角 Remix 徽章);「模板」可预览 6 个内置模板
+2. **看工作台**(免注册):用笔试文档中提供的只读演示账号登录,可浏览示例项目的对话历史、智能体时间线产物、版本列表与预览
+3. **完整体验**:注册任意邮箱(无需验证)→ 首页输入一句话 → 观看智能体流水线实况(约 1-2 分钟)→ 迭代 → 发布,或从资源中心 Remix 一个现成应用改造
+4. **本地验证**:`npm test` + `AGENT_MOCK=1` 模式下 `bash scripts/smoke.sh` 零成本跑通全链路(见下文)
 
 ## 核心流程
 
@@ -41,12 +42,20 @@ flowchart LR
 - **统一部署目标**(默认本机,多云接口预留):
   | 目标 | 状态 | 说明 |
   |---|---|---|
-  | 本机 · Quark 托管 | ✅ 默认 | 发布即部署:quark-apps 域,HTTPS + 云存储 + 制品体系 |
+  | 本机 · Fusion 托管 | ✅ 默认 | 发布即部署:独立应用域,HTTPS + 云存储 + 制品体系 |
   | AWS S3 静态托管 | ✅ 可用 | 每次部署创建**专属 bucket**(`quark-app-{slug}-{rand}`)+ 网站托管,返回 S3 网站端点(HTTP);应用云存储经 **CORS** 回源继续可用;可一键下线删桶;费用按 S3 计几乎为零 |
   | Netlify | 🧪 实验性 | 用你自己的 Personal Access Token(仅本次请求使用,不存储) |
   | Vercel / CF Pages | 🗺 规划 | `DeployTarget` 适配器接口已预留 |
-- **Quark 服务本身的快速部署**:仓库带 `Dockerfile` + `docker-compose.yml`,`docker compose up -d` 即起,
+- **Fusion 服务本身的快速部署**:仓库带 `Dockerfile` + `docker-compose.yml`,`docker compose up -d` 即起,
   环境变量全参数化(不绑定特定云)——默认本机 systemd 运行,任意云主机可用同一镜像自托管,详见 DEPLOY.md
+
+## 团队模式与构建目标
+
+- **👥 团队模式**(生成开关):流水线扩编为智能体团队 —— **PM** 把想法细化为需求单(用户目标/
+  用户故事/验收标准)→ **Architect** 产出界面架构蓝图(信息架构/组件/状态与数据流)→ Engineer 据此实现;
+  迭代时由 Architect 出「变更蓝图」。需求单与蓝图以卡片形式留档在对话里,时间线逐阶段标注所用模型
+- **构建目标**:创建时选择 🌐 网页 / 📱 移动,项目内可随时点击平台徽标**切换目标**——下次生成按新目标
+  规范执行,预览形态(手机框)与发布形态(PWA)自动跟随
 
 ## 模型选择与混合模型构建
 
@@ -129,7 +138,7 @@ v2(生产化改造,对应下方原扩展优先级 1-3 全部落地):
 - [x] **生成作业化**:任务落库 + 进程内队列(并发上限 2),SSE 断线重连自动续传(缓冲重放),刷新页面不丢进度;服务重启的中断任务落为明确失败态
 - [x] **Validator 阶段**:headless Chrome 真实加载产物,捕获运行时异常/console.error,失败自动回炉一轮修复并复验
 - [x] **应用云存储**(对标 Atoms Cloud):发布应用注入 `window.quark.storage`(服务端 KV,全部访客共享,8KB/值、64 键/应用),换设备数据仍在;不可用时自动降级 localStorage
-- [x] **安全**:发布应用迁移到独立源 `quark-apps.lexarcai.com`(与平台 cookie/origin 隔离);预览 iframe 去除 `allow-same-origin`;登录/注册限流 10 次/分/IP;生成限流 3 次/10 分 + 24h 配额 30 次/用户;变更类 API Origin 校验
+- [x] **安全**:发布应用迁移到独立应用域(与平台 cookie/origin 隔离);预览 iframe 去除 `allow-same-origin`;登录/注册限流 10 次/分/IP;生成限流 3 次/10 分 + 24h 配额 30 次/用户;变更类 API Origin 校验
 - [x] **可运维**:`/api/health`、SQLite 每日备份(保留 14 份)、vitest 单测+集成(11 例)、mock 流水线(`AGENT_MOCK=1`)、e2e 冒烟脚本、GitHub Actions CI
 
 v3(体验与产品闭环):

@@ -50,7 +50,7 @@ export default function Sidebar({
       <div className={`flex items-center px-4 py-4 ${collapsed ? "justify-center" : "justify-between"}`}>
         <Link href="/" className="flex items-center gap-2 font-semibold">
           <span className="text-lg">⚛</span>
-          {!collapsed && <span>Atoms</span>}
+          {!collapsed && <span>Fusion</span>}
         </Link>
         <button
           type="button"
@@ -72,7 +72,7 @@ export default function Sidebar({
             <span className="w-6 h-6 rounded-md bg-accent/80 text-white text-xs font-semibold flex items-center justify-center">
               {(user?.name ?? "G")[0].toUpperCase()}
             </span>
-            <span className="flex-1 text-left truncate">{user?.name ?? "Guest"}&rsquo;s Atoms</span>
+            <span className="flex-1 text-left truncate">{user?.name ?? "Guest"}&rsquo;s Fusion</span>
             <span className="text-[10px] text-muted">▾</span>
           </button>
         </div>
@@ -131,7 +131,7 @@ export default function Sidebar({
       {/* mobile top bar */}
       <div className="sm:hidden flex items-center justify-between px-4 py-3 border-b border-line bg-bg-deep">
         <Link href="/" className="flex items-center gap-2 font-semibold">
-          <span className="text-lg">⚛</span> Atoms
+          <span className="text-lg">☀</span> Fusion
         </Link>
         <button type="button" aria-label="打开菜单" className="text-xl px-1" onClick={() => setDrawerOpen(true)}>
           ☰

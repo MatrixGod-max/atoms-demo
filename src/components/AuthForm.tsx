@@ -62,6 +62,7 @@ function AuthFormInner({ mode }: { mode: "login" | "register" }) {
         let prompt = boot;
         let platform: "web" | "mobile" = "web";
         let research = false;
+        let team = false;
         let theme: string | null = null;
         try {
           const parsed = JSON.parse(boot);
@@ -69,12 +70,13 @@ function AuthFormInner({ mode }: { mode: "login" | "register" }) {
             prompt = parsed.prompt;
             platform = parsed.platform === "mobile" ? "mobile" : "web";
             research = !!parsed.research;
+            team = !!parsed.team;
             theme = typeof parsed.theme === "string" ? parsed.theme : null;
           }
         } catch {
           // legacy plain-string boot value
         }
-        const result = await launchProject(prompt, platform, { research, theme });
+        const result = await launchProject(prompt, platform, { research, team, theme });
         if ("id" in result) {
           router.push(`/project/${result.id}`);
           return;
@@ -91,7 +93,7 @@ function AuthFormInner({ mode }: { mode: "login" | "register" }) {
     <div className="flex-1 flex items-center justify-center px-6">
       <div className="w-full max-w-sm">
         <Link href="/" className="flex items-center justify-center gap-2 font-semibold text-lg mb-8">
-          <span className="text-accent text-2xl">⚛</span> Atoms
+          <span className="text-accent text-2xl">☀</span> Fusion
         </Link>
         <form className="card p-6 flex flex-col gap-4" onSubmit={submit}>
           <h1 className="font-semibold text-lg">{isRegister ? "创建账号" : "欢迎回来"}</h1>
@@ -126,10 +128,10 @@ function AuthFormInner({ mode }: { mode: "login" | "register" }) {
               className="input px-3 py-2"
               type="password"
               required
-              minLength={6}
+              minLength={10}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder={isRegister ? "至少 6 位" : "输入密码"}
+              placeholder={isRegister ? "至少 10 位,含字母与数字" : "输入密码"}
               autoComplete={isRegister ? "new-password" : "current-password"}
             />
           </label>

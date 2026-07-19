@@ -22,15 +22,25 @@ export interface ResearchBrief {
   references: string[];
 }
 
+export interface PmStories {
+  name: string;
+  summary: string;
+  goal: string;
+  stories: string[];
+  acceptance: string[];
+}
+
 export type AgentEvent =
   | {
       type: "stage";
-      stage: "researcher" | "planner" | "engineer" | "reviewer" | "validator";
+      stage: "researcher" | "pm" | "architect" | "planner" | "engineer" | "reviewer" | "validator";
       status: "start" | "done";
       info?: string;
       model?: string;
     }
   | { type: "plan"; spec: AppSpec }
+  | { type: "pm"; stories: PmStories }
+  | { type: "architect"; blueprint: string }
   | { type: "research"; brief: ResearchBrief }
   | { type: "code_delta"; delta: string }
   | { type: "code_reset" }
@@ -140,6 +150,7 @@ export interface PipelineInput {
   specJson: string | null;
   platform: "web" | "mobile";
   research?: boolean;
+  team?: boolean;
   attachments?: PipelineAttachment[];
   mode?: GenerationMode;
 }
@@ -183,7 +194,22 @@ async function* runMockPipeline(input: PipelineInput): AsyncGenerator<AgentEvent
     };
     yield { type: "stage", stage: "researcher", status: "done", info: "mock 研究完成" };
   }
-  if (!isIteration) {
+  if (input.team) {
+    if (!isIteration) {
+      yield { type: "stage", stage: "pm", status: "start", model: modelBadge(sm.pm) };
+      await sleep(40);
+      yield {
+        type: "pm",
+        stories: { name: "Mock 计数器", summary: "mock 团队产物", goal: "计数", stories: ["作为用户我想点击计数"], acceptance: ["点击后数字+1"] },
+      };
+      yield { type: "stage", stage: "pm", status: "done", info: "1 个用户故事", model: modelBadge(sm.pm) };
+    }
+    yield { type: "stage", stage: "architect", status: "start", model: modelBadge(sm.architect) };
+    await sleep(40);
+    yield { type: "architect", blueprint: isIteration ? "变更蓝图:仅调整按钮区块" : "架构蓝图:标题区 + 计数区 + 按钮区" };
+    yield { type: "stage", stage: "architect", status: "done", info: "蓝图就绪", model: modelBadge(sm.architect) };
+  }
+  if (!isIteration && !input.team) {
     yield { type: "stage", stage: "planner", status: "start", model: modelBadge(sm.planner) };
     await sleep(50);
     const spec: AppSpec = {
@@ -289,7 +315,63 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
     }
   }
 
-  if (!isIteration) {
+  // ---- Team mode: PM -> Architect (replaces the single Planner on fresh builds) ----
+  let pmOut: PmStories | null = null;
+  let blueprint: string | null = null;
+  if (input.team) {
+    if (!isIteration) {
+      yield { type: "stage", stage: "pm", status: "start", model: modelBadge(sm.pm) };
+      const rawPm = await chat(
+        [
+          {
+            role: "system",
+            content: `你是 Fusion 平台的产品经理智能体(PM)。把用户的${isMobile ? "移动" : "网页"}应用想法细化为可开发的需求,严格输出 JSON(无其他文字):
+{"name":"应用名(<=12字)","summary":"一句话定位","goal":"用户目标一句话","stories":["作为…我想…以便…(3-5条,按优先级)"],"acceptance":["可验证的验收标准 3-5 条"]}
+语言与用户输入一致。故事要克制:只写一次生成能落地的范围。`,
+          },
+          {
+            role: "user",
+            content: `${input.request}${brief ? `\n\n研究员简报:\n${JSON.stringify(brief, null, 2)}` : ""}${attContext}`,
+          },
+        ],
+        2048,
+        0.5,
+        sm.pm
+      );
+      pmOut = JSON.parse(extractJson(rawPm)) as PmStories;
+      yield { type: "pm", stories: pmOut };
+      yield { type: "stage", stage: "pm", status: "done", info: `${pmOut.stories.length} 个用户故事` };
+      spec = { name: pmOut.name, summary: pmOut.summary, features: pmOut.stories.slice(0, 5), design: "" };
+    }
+    yield { type: "stage", stage: "architect", status: "start", model: modelBadge(sm.architect) };
+    const rawArch = await chat(
+      [
+        {
+          role: "system",
+          content: `你是 Fusion 平台的架构师智能体(Architect)。${
+            isIteration
+              ? "针对现有单文件应用的修改需求,输出一份精炼的「变更蓝图」:改动哪些区块/组件、状态与数据流如何调整、哪些保持不变。500 字以内,条目化。"
+              : "为单文件应用输出一份精炼的「界面架构蓝图」:信息架构(页面区块自上而下)、核心组件清单、状态与数据流(含持久化 key)、关键交互。600 字以内,条目化。"
+          }语言与用户输入一致,不要输出代码。`,
+        },
+        {
+          role: "user",
+          content: isIteration
+            ? `现有应用代码(节选前 6000 字):\n${(input.currentHtml ?? "").slice(0, 6000)}\n\n修改需求: ${input.request}${attContext}`
+            : `需求:${input.request}\n\nPM 需求单:\n${JSON.stringify(pmOut, null, 2)}${attContext}`,
+        },
+      ],
+      2048,
+      0.4,
+      sm.architect
+    );
+    blueprint = rawArch.trim();
+    yield { type: "architect", blueprint };
+    yield { type: "stage", stage: "architect", status: "done", info: isIteration ? "变更蓝图就绪" : "架构蓝图就绪" };
+    if (spec) spec.design = blueprint.split("\n")[0].slice(0, 60);
+  }
+
+  if (!isIteration && !input.team) {
     yield { type: "stage", stage: "planner", status: "start", model: modelBadge(sm.planner) };
     const raw = await chat(
       [
@@ -332,12 +414,16 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
       .join("\n");
     engineerMessages.push({
       role: "user",
-      content: `这是当前应用的完整代码:\n\n${input.currentHtml}\n\n最近的对话:\n${recent}\n\n用户的新需求: ${input.request}${attContext}\n\n请在保留现有功能与风格的基础上完成修改,输出修改后的完整 HTML 文件。`,
+      content: `这是当前应用的完整代码:\n\n${input.currentHtml}\n\n最近的对话:\n${recent}\n\n用户的新需求: ${input.request}${
+        blueprint ? `\n\n架构师的变更蓝图(请遵循):\n${blueprint}` : ""
+      }${attContext}\n\n请在保留现有功能与风格的基础上完成修改,输出修改后的完整 HTML 文件。`,
     });
   } else {
     engineerMessages.push({
       role: "user",
-      content: `产品规格:\n${JSON.stringify(spec, null, 2)}\n\n用户原始需求: ${input.request}${attContext}\n\n请实现这个应用。`,
+      content: pmOut
+        ? `PM 需求单:\n${JSON.stringify(pmOut, null, 2)}\n\n架构师蓝图(请遵循):\n${blueprint}\n\n用户原始需求: ${input.request}${attContext}\n\n请实现这个应用。`
+        : `产品规格:\n${JSON.stringify(spec, null, 2)}\n\n用户原始需求: ${input.request}${attContext}\n\n请实现这个应用。`,
     });
   }
 

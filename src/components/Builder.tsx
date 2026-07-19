@@ -68,11 +68,13 @@ interface Spec {
   design: string;
 }
 
-type StageName = "researcher" | "planner" | "engineer" | "reviewer" | "validator";
+type StageName = "researcher" | "pm" | "architect" | "planner" | "engineer" | "reviewer" | "validator";
 type StageState = "idle" | "active" | "done";
 
 const STAGE_LABELS: Record<StageName, string> = {
   researcher: "Researcher · 研究",
+  pm: "PM · 产品",
+  architect: "Architect · 架构",
   planner: "Planner · 规划",
   engineer: "Engineer · 构建",
   reviewer: "Reviewer · 评审",
@@ -81,6 +83,8 @@ const STAGE_LABELS: Record<StageName, string> = {
 
 const IDLE_STAGES: Record<StageName, { state: StageState; info?: string; model?: string }> = {
   researcher: { state: "idle" },
+  pm: { state: "idle" },
+  architect: { state: "idle" },
   planner: { state: "idle" },
   engineer: { state: "idle" },
   reviewer: { state: "idle" },
@@ -114,6 +118,7 @@ export default function Builder({ projectId }: { projectId: string }) {
   const [nameDraft, setNameDraft] = useState("");
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
   const [research, setResearch] = useState(false);
+  const [team, setTeam] = useState(false);
   const [genMode, setGenMode] = useState<"fast" | "mixed" | "deep">("fast");
   const [previewReady, setPreviewReady] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
@@ -214,6 +219,18 @@ export default function Builder({ projectId }: { projectId: string }) {
                 { id: `tmp_r_${Date.now()}`, role: "agent", content: JSON.stringify(event.brief), meta: "research" },
               ]);
               break;
+            case "pm":
+              setMessages((m) => [
+                ...m,
+                { id: `tmp_pm_${Date.now()}`, role: "agent", content: JSON.stringify(event.stories), meta: "pm" },
+              ]);
+              break;
+            case "architect":
+              setMessages((m) => [
+                ...m,
+                { id: `tmp_ar_${Date.now()}`, role: "agent", content: JSON.stringify(event.blueprint), meta: "architect" },
+              ]);
+              break;
             case "code_delta":
               setStreamCode((c) => c + event.delta);
               break;
@@ -279,7 +296,7 @@ export default function Builder({ projectId }: { projectId: string }) {
   );
 
   const generate = useCallback(
-    async (prompt: string, researchOverride?: boolean) => {
+    async (prompt: string, researchOverride?: boolean, teamOverride?: boolean) => {
       setGenerating(true);
       resetRunState();
       setMessages((m) => [...m, { id: `tmp_${Date.now()}`, role: "user", content: prompt }]);
@@ -287,7 +304,7 @@ export default function Builder({ projectId }: { projectId: string }) {
         const res = await fetch(`/api/projects/${projectId}/generate`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ prompt, research: researchOverride ?? research, mode: genMode }),
+          body: JSON.stringify({ prompt, research: researchOverride ?? research, team: teamOverride ?? team, mode: genMode }),
         });
         const data = await res.json().catch(() => ({}));
         if (res.status === 401) {
@@ -306,7 +323,7 @@ export default function Builder({ projectId }: { projectId: string }) {
         setGenerating(false);
       }
     },
-    [projectId, research, genMode, attachJob, resetRunState, pushError]
+    [projectId, research, team, genMode, attachJob, resetRunState, pushError]
   );
 
   // Initial load: reconnect to a live job if one exists, else auto-start a freshly created project.
@@ -326,17 +343,20 @@ export default function Builder({ projectId }: { projectId: string }) {
         // New launches store JSON {prompt, research}; legacy values are the plain prompt string.
         let bootPrompt = pending;
         let bootResearch = false;
+        let bootTeam = false;
         try {
           const parsed = JSON.parse(pending);
           if (parsed && typeof parsed.prompt === "string") {
             bootPrompt = parsed.prompt;
             bootResearch = !!parsed.research;
+            bootTeam = !!parsed.team;
           }
         } catch {
           // legacy plain-string pending value
         }
         if (bootResearch) setResearch(true);
-        generate(bootPrompt, bootResearch);
+        if (bootTeam) setTeam(true);
+        generate(bootPrompt, bootResearch, bootTeam);
       }
     })();
   }, [load, generate, attachJob, resetRunState, projectId]);
@@ -390,7 +410,7 @@ export default function Builder({ projectId }: { projectId: string }) {
     setPublishBusy(false);
   }
 
-  async function patchProject(body: { name?: string; inGallery?: boolean }) {
+  async function patchProject(body: { name?: string; inGallery?: boolean; platform?: "web" | "mobile" }) {
     const res = await fetch(`/api/projects/${projectId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -505,7 +525,22 @@ export default function Builder({ projectId }: { projectId: string }) {
             }}
           >
             {project && (
-              <span className="mr-1.5" title={project.platform === "mobile" ? "移动应用" : "网页应用"}>
+              <span
+                className="mr-1.5 cursor-pointer hover:opacity-70"
+                title={`构建目标:${project.platform === "mobile" ? "移动应用" : "网页应用"}(点击切换)`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (generating) return;
+                  const next = project.platform === "mobile" ? "web" : "mobile";
+                  if (
+                    confirm(
+                      `把构建目标切换为「${next === "mobile" ? "📱 移动应用" : "🌐 网页应用"}」?下次生成将按新目标的规范执行,预览与发布形态随之切换。`
+                    )
+                  ) {
+                    patchProject({ platform: next });
+                  }
+                }}
+              >
                 {project.platform === "mobile" ? "📱" : "🌐"}
               </span>
             )}
@@ -670,6 +705,43 @@ export default function Builder({ projectId }: { projectId: string }) {
         >
           <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
             {messages.map((m) => {
+              if (m.meta === "pm") {
+                let pm: { name?: string; summary?: string; goal?: string; stories?: string[]; acceptance?: string[] } | null = null;
+                try {
+                  pm = JSON.parse(m.content);
+                } catch {
+                  pm = null;
+                }
+                if (!pm) return null;
+                return (
+                  <div key={m.id} className="p-3 text-xs self-start max-w-[92%] border border-accent/40 bg-accent-soft rounded-lg">
+                    <p className="font-mono text-[10px] tracking-widest text-accent mb-1.5">PM · 需求单</p>
+                    {pm.goal && <p className="text-ink">🎯 {pm.goal}</p>}
+                    {!!pm.stories?.length && (
+                      <ul className="mt-1.5 space-y-1 text-muted">
+                        {pm.stories.map((st) => (
+                          <li key={st}>· {st}</li>
+                        ))}
+                      </ul>
+                    )}
+                    {!!pm.acceptance?.length && <p className="text-muted mt-1.5">验收:{pm.acceptance.join(" · ")}</p>}
+                  </div>
+                );
+              }
+              if (m.meta === "architect") {
+                let bp = "";
+                try {
+                  bp = JSON.parse(m.content);
+                } catch {
+                  bp = m.content;
+                }
+                return (
+                  <div key={m.id} className="p-3 text-xs self-start max-w-[92%] border border-line bg-bg-deep rounded-lg">
+                    <p className="font-mono text-[10px] tracking-widest text-muted mb-1.5">ARCHITECT · 蓝图</p>
+                    <p className="text-muted whitespace-pre-wrap leading-relaxed">{String(bp).slice(0, 600)}</p>
+                  </div>
+                );
+              }
               if (m.meta === "research") {
                 let brief: {
                   audience?: string;
@@ -745,7 +817,12 @@ export default function Builder({ projectId }: { projectId: string }) {
                 </p>
                 <div className="flex flex-col gap-3">
                   {(Object.keys(STAGE_LABELS) as StageName[])
-                    .filter((name) => name !== "researcher" || stages.researcher.state !== "idle" || research)
+                    .filter((name) => {
+                      if (name === "researcher") return stages.researcher.state !== "idle" || research;
+                      if (name === "pm" || name === "architect") return stages[name].state !== "idle" || team;
+                      if (name === "planner") return !team || stages.planner.state !== "idle";
+                      return true;
+                    })
                     .map((name) => (
                     <div key={name} className="flex items-center gap-3">
                       <span
@@ -798,6 +875,14 @@ export default function Builder({ projectId }: { projectId: string }) {
                 title="生成前由研究员智能体做领域分析;需求中的公开链接会被抓取纳入研究"
               >
                 🔬 深度研究{research ? " ✓" : ""}
+              </button>
+              <button
+                className={`px-2.5 py-1 text-xs rounded-lg border transition-colors ${team ? "border-accent/60 text-accent bg-accent-soft" : "border-line text-muted hover:text-ink"}`}
+                onClick={() => setTeam(!team)}
+                disabled={generating}
+                title="智能体团队构建:PM 细化需求 → Architect 出架构蓝图 → Engineer 实现(迭代时由 Architect 出变更蓝图)"
+              >
+                👥 团队模式{team ? " ✓" : ""}
               </button>
               <div className="flex items-center rounded-lg border border-line overflow-hidden text-[11px]">
                 {GEN_MODES.map(([m, label, desc]) => (

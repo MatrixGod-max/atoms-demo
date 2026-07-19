@@ -20,7 +20,7 @@ export const MODES: { id: GenerationMode; label: string; desc: string }[] = [
   { id: "deep", label: "🐢 深度", desc: "全阶段 R1:最强推理,速度最慢" },
 ];
 
-export type PipelineStage = "researcher" | "planner" | "engineer" | "reviewer";
+export type PipelineStage = "researcher" | "pm" | "architect" | "planner" | "engineer" | "reviewer";
 
 const CHAT = "deepseek-chat";
 const REASONER = "deepseek-reasoner";
@@ -31,12 +31,12 @@ export function normalizeMode(mode: unknown): GenerationMode {
 
 export function stageModels(mode: GenerationMode): Record<PipelineStage, string> {
   if (mode === "deep") {
-    return { researcher: REASONER, planner: REASONER, engineer: REASONER, reviewer: REASONER };
+    return { researcher: REASONER, pm: REASONER, architect: REASONER, planner: REASONER, engineer: REASONER, reviewer: REASONER };
   }
   if (mode === "mixed") {
-    return { researcher: REASONER, planner: REASONER, engineer: CHAT, reviewer: REASONER };
+    return { researcher: REASONER, pm: REASONER, architect: REASONER, planner: REASONER, engineer: CHAT, reviewer: REASONER };
   }
-  return { researcher: CHAT, planner: CHAT, engineer: CHAT, reviewer: CHAT };
+  return { researcher: CHAT, pm: CHAT, architect: CHAT, planner: CHAT, engineer: CHAT, reviewer: CHAT };
 }
 
 export function modelBadge(apiModel: string): string {

@@ -77,12 +77,12 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
     setError("");
     closeMenus();
     if (!loggedIn) {
-      sessionStorage.setItem("quark_boot", JSON.stringify({ prompt: trimmed, platform, research, theme }));
+      sessionStorage.setItem("quark_boot", JSON.stringify({ prompt: trimmed, platform, research, team: teamMode, theme }));
       router.push("/register?next=launch");
       return;
     }
     setBusy(true);
-    const result = await launchProject(trimmed, platform, { research, theme });
+    const result = await launchProject(trimmed, platform, { research, team: teamMode, theme });
     if ("error" in result) {
       setError(result.error);
       setBusy(false);

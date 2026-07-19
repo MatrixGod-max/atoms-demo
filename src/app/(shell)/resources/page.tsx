@@ -6,7 +6,7 @@ import TemplateCard, { type TemplateMeta } from "@/components/TemplateCard";
 
 export const dynamic = "force-dynamic";
 
-export const metadata = { title: "资源 — Atoms" };
+export const metadata = { title: "资源 — Fusion" };
 
 export default async function Resources({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const { tab } = await searchParams;
