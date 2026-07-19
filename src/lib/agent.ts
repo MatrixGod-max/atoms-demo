@@ -10,6 +10,7 @@ type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
 import { validateHtml } from "./validate";
 import { fetchReferences } from "./research";
+import { modelBadge, normalizeMode, stageModels, type GenerationMode } from "./models";
 import type { PipelineAttachment } from "./attachments";
 
 export interface ResearchBrief {
@@ -27,6 +28,7 @@ export type AgentEvent =
       stage: "researcher" | "planner" | "engineer" | "reviewer" | "validator";
       status: "start" | "done";
       info?: string;
+      model?: string;
     }
   | { type: "plan"; spec: AppSpec }
   | { type: "research"; brief: ResearchBrief }
@@ -49,11 +51,11 @@ function apiKey(): string {
   return key;
 }
 
-async function chat(messages: ChatMessage[], maxTokens = 4096, temperature = 0.3): Promise<string> {
+async function chat(messages: ChatMessage[], maxTokens = 4096, temperature = 0.3, model = MODEL): Promise<string> {
   const res = await fetch(API_URL, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${apiKey()}` },
-    body: JSON.stringify({ model: MODEL, messages, max_tokens: maxTokens, temperature }),
+    body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature }),
   });
   if (!res.ok) throw new Error(`LLM API ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const data = await res.json();
@@ -63,12 +65,13 @@ async function chat(messages: ChatMessage[], maxTokens = 4096, temperature = 0.3
 async function* chatStream(
   messages: ChatMessage[],
   maxTokens = 8192,
-  temperature = 0.2
+  temperature = 0.2,
+  model = MODEL
 ): AsyncGenerator<string> {
   const res = await fetch(API_URL, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${apiKey()}` },
-    body: JSON.stringify({ model: MODEL, messages, max_tokens: maxTokens, temperature, stream: true }),
+    body: JSON.stringify({ model, messages, max_tokens: maxTokens, temperature, stream: true }),
   });
   if (!res.ok || !res.body) {
     throw new Error(`LLM API ${res.status}: ${(await res.text()).slice(0, 300)}`);
@@ -138,6 +141,7 @@ export interface PipelineInput {
   platform: "web" | "mobile";
   research?: boolean;
   attachments?: PipelineAttachment[];
+  mode?: GenerationMode;
 }
 
 /** Attachment context shared by Planner and Engineer prompts. */
@@ -162,8 +166,9 @@ async function* runMockPipeline(input: PipelineInput): AsyncGenerator<AgentEvent
   const isIteration = !!input.currentHtml;
   const broken = input.request.includes("MOCK_BROKEN");
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const sm = stageModels(normalizeMode(input.mode));
   if (input.research) {
-    yield { type: "stage", stage: "researcher", status: "start" };
+    yield { type: "stage", stage: "researcher", status: "start", model: modelBadge(sm.researcher) };
     await sleep(60);
     yield {
       type: "research",
@@ -179,7 +184,7 @@ async function* runMockPipeline(input: PipelineInput): AsyncGenerator<AgentEvent
     yield { type: "stage", stage: "researcher", status: "done", info: "mock 研究完成" };
   }
   if (!isIteration) {
-    yield { type: "stage", stage: "planner", status: "start" };
+    yield { type: "stage", stage: "planner", status: "start", model: modelBadge(sm.planner) };
     await sleep(50);
     const spec: AppSpec = {
       name: "Mock 计数器",
@@ -190,7 +195,7 @@ async function* runMockPipeline(input: PipelineInput): AsyncGenerator<AgentEvent
     yield { type: "plan", spec };
     yield { type: "stage", stage: "planner", status: "done", info: spec.name };
   }
-  yield { type: "stage", stage: "engineer", status: "start" };
+  yield { type: "stage", stage: "engineer", status: "start", model: modelBadge(sm.engineer) };
   const mobileMeta =
     input.platform === "mobile"
       ? `<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#0d0e1c"><meta name="apple-mobile-web-app-capable" content="yes">`
@@ -218,7 +223,7 @@ ${broken ? "<script>throw new Error('mock runtime failure')<\/script>" : ""}
     yield { type: "code_delta", delta: html.slice(i, i + 200) };
   }
   yield { type: "stage", stage: "engineer", status: "done", info: `${html.length} 字符` };
-  yield { type: "stage", stage: "reviewer", status: "start" };
+  yield { type: "stage", stage: "reviewer", status: "start", model: modelBadge(sm.reviewer) };
   await sleep(50);
   yield { type: "stage", stage: "reviewer", status: "done", info: "mock 评审通过" };
 
@@ -250,11 +255,12 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
   // ---- Stage 1: Planner (first generation only) ----
   const isMobile = input.platform === "mobile";
   const attContext = attachmentContext(input.attachments);
+  const sm = stageModels(normalizeMode(input.mode));
 
   // ---- Stage 0 (optional): Researcher ----
   let brief: ResearchBrief | null = null;
   if (input.research) {
-    yield { type: "stage", stage: "researcher", status: "start" };
+    yield { type: "stage", stage: "researcher", status: "start", model: modelBadge(sm.researcher) };
     const references = await fetchReferences(input.request);
     const refBlock = references.length
       ? `\n\n参考资料(用户提供的链接抓取):\n${references.map((r) => `- ${r.url}\n${r.excerpt.slice(0, 1500)}`).join("\n")}`
@@ -271,7 +277,8 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
           { role: "user", content: `${input.request}${refBlock}${attContext}` },
         ],
         2048,
-        0.6
+        0.6,
+        sm.researcher
       );
       brief = JSON.parse(extractJson(raw)) as ResearchBrief;
       if (references.length) brief.references = references.map((r) => r.url);
@@ -283,7 +290,7 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
   }
 
   if (!isIteration) {
-    yield { type: "stage", stage: "planner", status: "start" };
+    yield { type: "stage", stage: "planner", status: "start", model: modelBadge(sm.planner) };
     const raw = await chat(
       [
         {
@@ -302,7 +309,8 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
         },
       ],
       1024,
-      0.5
+      0.5,
+      sm.planner
     );
     spec = JSON.parse(extractJson(raw)) as AppSpec;
     yield { type: "plan", spec };
@@ -310,7 +318,7 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
   }
 
   // ---- Stage 2: Engineer (streamed) ----
-  yield { type: "stage", stage: "engineer", status: "start" };
+  yield { type: "stage", stage: "engineer", status: "start", model: modelBadge(sm.engineer) };
   const engineerMessages: ChatMessage[] = [
     {
       role: "system",
@@ -334,7 +342,7 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
   }
 
   let html = "";
-  for await (const delta of chatStream(engineerMessages)) {
+  for await (const delta of chatStream(engineerMessages, 8192, 0.2, sm.engineer)) {
     html += delta;
     yield { type: "code_delta", delta };
   }
@@ -345,7 +353,7 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
   yield { type: "stage", stage: "engineer", status: "done", info: `${html.length} 字符` };
 
   // ---- Stage 3: Reviewer ----
-  yield { type: "stage", stage: "reviewer", status: "start" };
+  yield { type: "stage", stage: "reviewer", status: "start", model: modelBadge(sm.reviewer) };
   let reviewNotes = "";
   try {
     const review = await chat(
@@ -361,7 +369,8 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
         { role: "user", content: `用户需求: ${input.request}\n\n待评审代码:\n\n${html}` },
       ],
       8192,
-      0.1
+      0.1,
+      sm.reviewer
     );
     const verdictMatch = review.match(/VERDICT:\s*(pass|fix)/i);
     const notesMatch = review.match(/NOTES:\s*(.+)/);
@@ -403,7 +412,11 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
           .map((e) => `- ${e}`)
           .join("\n")}\n\n当前代码:\n\n${html}\n\n请修复这些运行时错误,保持功能与视觉不变,输出修复后的完整 HTML 文件。`,
       },
-    ])) {
+      ],
+      8192,
+      0.2,
+      sm.engineer
+    )) {
       fixed += delta;
       yield { type: "code_delta", delta };
     }

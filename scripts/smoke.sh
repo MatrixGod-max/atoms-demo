@@ -104,6 +104,13 @@ if curl -fsS "$BASE_URL/p/$MSLUG/v/1" | grep -q "serviceWorker"; then fail "snap
 step "web project has no PWA injection (regression)"
 if curl -fsS "$BASE_URL/p/$SLUG" | grep -q 'rel="manifest"'; then fail "web app must not have manifest"; fi
 
+step "mixed-mode generation carries per-stage model badges"
+XJOB=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects/$MPROJ/generate" \
+  -H 'content-type: application/json' -d '{"prompt":"mock 模式测试","mode":"mixed"}' | sed -E 's/.*"jobId":"([^"]+)".*/\1/')
+XSTREAM=$(timeout 120 curl -fsS -N -b "$JAR" "$BASE_URL/api/jobs/$XJOB/stream")
+echo "$XSTREAM" | grep -q '"stage":"engineer","status":"start".*"model":"V3"' || fail "engineer should use V3 in mixed"
+echo "$XSTREAM" | grep -q '"stage":"reviewer","status":"start".*"model":"R1"' || fail "reviewer should use R1 in mixed"
+
 step "resources: templates listed, template quick-start, CORS preflight"
 TCOUNT=$(curl -fsS "$BASE_URL/api/templates" | grep -o '"id":"tpl_' | wc -l)
 [ "$TCOUNT" -ge 6 ] || fail "expected >=6 templates, got $TCOUNT"

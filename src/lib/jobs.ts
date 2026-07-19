@@ -2,6 +2,7 @@ import { db, now } from "./db";
 import { newId } from "./auth";
 import { runPipeline, type AgentEvent, type AppSpec } from "./agent";
 import { inlineImageAssets, loadPipelineAttachments } from "./attachments";
+import type { GenerationMode } from "./models";
 
 const MAX_CONCURRENT = 2;
 const BUFFER_CAP = 9000;
@@ -29,6 +30,7 @@ interface LiveJob {
   userId: string;
   prompt: string;
   research: boolean;
+  mode: GenerationMode;
   history: { role: "user" | "agent"; content: string }[];
   buffer: string[];
   droppedDeltas: boolean;
@@ -62,7 +64,13 @@ class JobRunner {
     return this.live.get(jobId);
   }
 
-  start(projectId: string, userId: string, prompt: string, research = false): { jobId: string; position: number } {
+  start(
+    projectId: string,
+    userId: string,
+    prompt: string,
+    research = false,
+    mode: GenerationMode = "fast"
+  ): { jobId: string; position: number } {
     const existing = this.activeJobForProject(projectId);
     if (existing) {
       const err = new Error("该项目已有生成任务在进行中") as Error & { code: number; jobId: string };
@@ -79,8 +87,8 @@ class JobRunner {
     const jobId = newId("j");
     const t = now();
     db.prepare(
-      "INSERT INTO jobs (id, project_id, user_id, prompt, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'queued', ?, ?)"
-    ).run(jobId, projectId, userId, prompt, t, t);
+      "INSERT INTO jobs (id, project_id, user_id, prompt, status, mode, created_at, updated_at) VALUES (?, ?, ?, ?, 'queued', ?, ?, ?)"
+    ).run(jobId, projectId, userId, prompt, mode, t, t);
     db.prepare("INSERT INTO messages (id, project_id, role, content, created_at) VALUES (?, ?, 'user', ?, ?)").run(
       newId("m"),
       projectId,
@@ -94,6 +102,7 @@ class JobRunner {
       userId,
       prompt,
       research,
+      mode,
       history,
       buffer: [],
       droppedDeltas: false,
@@ -182,6 +191,7 @@ class JobRunner {
         platform: project.platform === "mobile" ? "mobile" : "web",
         research: job.research,
         attachments,
+        mode: job.mode,
       })) {
         if (event.type === "plan") spec = event.spec;
         if (event.type === "stage" && event.status === "start") {

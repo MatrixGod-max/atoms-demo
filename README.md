@@ -48,6 +48,19 @@ flowchart LR
 - **Quark 服务本身的快速部署**:仓库带 `Dockerfile` + `docker-compose.yml`,`docker compose up -d` 即起,
   环境变量全参数化(不绑定特定云)——默认本机 systemd 运行,任意云主机可用同一镜像自托管,详见 DEPLOY.md
 
+## 模型选择与混合模型构建
+
+生成前可选三档模式(工作台输入区),流水线**按阶段混用模型**,时间线实时标注每个阶段用了哪个模型:
+
+| 模式 | Researcher/Planner/Reviewer | Engineer(流式编码) | 适用 |
+|---|---|---|---|
+| ⚡ 快速(默认) | DeepSeek V3 | DeepSeek V3 | 日常迭代,最快 |
+| 🧠 混合 | **DeepSeek R1**(深思考) | DeepSeek V3(写得快) | 复杂需求首次生成,思考与速度兼得 |
+| 🐢 深度 | DeepSeek R1 | DeepSeek R1 | 最强推理,最慢 |
+
+模型注册表(`src/lib/models.ts`)结构化预留扩展位;R1 的思考过程(reasoning_content)不进入产物。
+构建完成自动切换预览;若停留在代码页会出现「✓ 新版本已生成 → 查看预览」,移动端「应用」tab 显示完成绿点。
+
 ## 附件 · 深度研究 · 主题变换
 
 - **📎 附件上传**(工作台输入区):文本/数据文件(txt/md/csv/json ≤64KB)全文进入智能体上下文 ——

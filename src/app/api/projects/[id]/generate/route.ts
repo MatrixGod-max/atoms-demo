@@ -4,6 +4,7 @@ import { demoGuard, getUser } from "@/lib/auth";
 import { ownedProject } from "@/lib/projects";
 import { jobRunner } from "@/lib/jobs";
 import { rateLimit } from "@/lib/ratelimit";
+import { normalizeMode } from "@/lib/models";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +19,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const project = ownedProject(user.id, id);
   if (!project) return NextResponse.json({ error: "项目不存在" }, { status: 404 });
 
-  const { prompt, research } = await req.json().catch(() => ({}));
+  const { prompt, research, mode } = await req.json().catch(() => ({}));
   if (typeof prompt !== "string" || !prompt.trim()) {
     return NextResponse.json({ error: "请输入需求" }, { status: 400 });
   }
@@ -40,7 +41,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   }
 
   try {
-    const { jobId, position } = jobRunner.start(id, user.id, prompt.trim(), research === true);
+    const { jobId, position } = jobRunner.start(id, user.id, prompt.trim(), research === true, normalizeMode(mode));
     return NextResponse.json({ jobId, position });
   } catch (err) {
     const e = err as Error & { code?: number; jobId?: string };

@@ -136,6 +136,7 @@ function createDb(): DatabaseSync {
   ensureColumn(db, "projects", "in_gallery", "in_gallery INTEGER NOT NULL DEFAULT 1");
   ensureColumn(db, "projects", "platform", "platform TEXT NOT NULL DEFAULT 'web' CHECK (platform IN ('web','mobile'))");
   ensureColumn(db, "users", "is_demo", "is_demo INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "jobs", "mode", "mode TEXT NOT NULL DEFAULT 'fast'");
   backfillArtifacts(db);
   return db;
 }
