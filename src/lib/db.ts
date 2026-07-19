@@ -177,6 +177,22 @@ function createDb(): DatabaseSync {
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_domain ON projects(domain_name) WHERE domain_name IS NOT NULL");
   db.exec("CREATE INDEX IF NOT EXISTS idx_credit_events_user ON credit_events(user_id, created_at)");
   db.exec(`
+    CREATE TABLE IF NOT EXISTS native_builds (
+      id             TEXT PRIMARY KEY,
+      project_id     TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      user_id        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      platform       TEXT NOT NULL CHECK (platform IN ('android','ios')),
+      status         TEXT NOT NULL CHECK (status IN ('queued','building','done','error')),
+      error          TEXT,
+      artifact_path  TEXT,
+      artifact_bytes INTEGER,
+      log            TEXT,
+      created_at     INTEGER NOT NULL,
+      updated_at     INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_native_builds_project ON native_builds(project_id, created_at);
+  `);
+  db.exec(`
     CREATE TABLE IF NOT EXISTS app_reports (
       id           TEXT PRIMARY KEY,
       project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,

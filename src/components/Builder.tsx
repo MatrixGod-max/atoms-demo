@@ -73,6 +73,17 @@ interface AttachmentMeta {
   size: number;
 }
 
+interface NativeBuildInfo {
+  id: string;
+  platform: "android" | "ios";
+  status: "queued" | "building" | "done" | "error";
+  error: string | null;
+  artifact_bytes: number | null;
+  log_tail: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
 interface AppReport {
   id: string;
   kind: "feedback" | "error";
@@ -153,6 +164,9 @@ export default function Builder({ projectId }: { projectId: string }) {
   const [previewReady, setPreviewReady] = useState(false);
   const [srcFiles, setSrcFiles] = useState<Record<string, string> | null>(null);
   const [activeFile, setActiveFile] = useState<string | null>(null);
+  const [nativeBuilds, setNativeBuilds] = useState<NativeBuildInfo[]>([]);
+  const [nbOpen, setNbOpen] = useState(false);
+  const [nbBusy, setNbBusy] = useState(false);
   const [pickMode, setPickMode] = useState(false);
   const [pickTarget, setPickTarget] = useState<{ selector: string; snippet: string; label: string } | null>(null);
   const [reports, setReports] = useState<AppReport[]>([]);
@@ -474,6 +488,46 @@ export default function Builder({ projectId }: { projectId: string }) {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, spec, generating]);
+
+  // 原生打包: 214 云构建 APK 的状态与触发。
+  const loadNativeBuilds = useCallback(async () => {
+    const res = await fetch(`/api/projects/${projectId}/native-build`);
+    if (!res.ok) return;
+    const data = await res.json().catch(() => ({}));
+    setNativeBuilds(data.builds ?? []);
+  }, [projectId]);
+
+  useEffect(() => {
+    if (detail?.project.platform !== "mobile") return;
+    // Defer past the commit so the lint-enforced "no sync setState in effect" invariant holds.
+    const t = setTimeout(loadNativeBuilds, 0);
+    return () => clearTimeout(t);
+  }, [detail?.project.platform, loadNativeBuilds]);
+
+  // Poll while a build is in flight.
+  useEffect(() => {
+    if (!nativeBuilds.some((b) => b.status === "queued" || b.status === "building")) return;
+    const t = setInterval(loadNativeBuilds, 5000);
+    return () => clearInterval(t);
+  }, [nativeBuilds, loadNativeBuilds]);
+
+  async function startNativeBuild(nbPlatform: "android" | "ios") {
+    if (nbBusy) return;
+    setNbBusy(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/native-build`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ platform: nbPlatform }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) pushError(data.error || "打包启动失败");
+      else window.dispatchEvent(new Event("credits-changed"));
+      await loadNativeBuilds();
+    } finally {
+      setNbBusy(false);
+    }
+  }
 
   // 运营面板: visitor feedback + runtime error reports of the published app.
   const loadReports = useCallback(async () => {
@@ -803,6 +857,90 @@ export default function Builder({ projectId }: { projectId: string }) {
               </option>
             ))}
           </select>
+        )}
+        {project?.platform === "mobile" && project?.current_version_id && (
+          <div className="relative">
+            <button
+              className="btn-ghost px-3 py-1.5 text-xs"
+              onClick={() => {
+                if (!nbOpen) loadNativeBuilds();
+                setNbOpen(!nbOpen);
+              }}
+              title="云端构建原生安装包(Android APK 于远程构建机产出,debug 签名可直接安装)"
+            >
+              🤖 打包
+              {nativeBuilds.some((b) => b.status === "queued" || b.status === "building") && (
+                <span className="ml-1 text-amber animate-pulse">●</span>
+              )}
+            </button>
+            {nbOpen && (
+              <div className="absolute right-0 top-full mt-1 card p-3 z-20 w-80 max-w-[90vw] flex flex-col gap-2.5 text-xs">
+                <p className="font-mono text-[10px] tracking-widest text-muted">原生打包 · 云构建</p>
+                <div className="border border-line rounded-lg p-2.5">
+                  <div className="flex items-center gap-2">
+                    <b>🤖 Android APK</b>
+                    <span className="text-muted">debug 签名 · 5 积分</span>
+                    <button
+                      className="btn-primary px-3 py-1 ml-auto"
+                      disabled={nbBusy || nativeBuilds.some((b) => b.status === "queued" || b.status === "building")}
+                      onClick={() => startNativeBuild("android")}
+                    >
+                      {nbBusy ? "…" : "打包"}
+                    </button>
+                  </div>
+                  <p className="text-muted mt-1">产出即可安装(设备需允许安装未知来源应用),约 2-5 分钟</p>
+                  {nativeBuilds.slice(0, 3).map((b) => (
+                    <div key={b.id} className="mt-2 pt-2 border-t border-line">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={
+                            b.status === "done" ? "text-good" : b.status === "error" ? "text-bad" : "text-amber"
+                          }
+                        >
+                          {b.status === "done"
+                            ? "✓ 完成"
+                            : b.status === "error"
+                              ? "✗ 失败"
+                              : b.status === "building"
+                                ? "⏳ 构建中…"
+                                : "排队中"}
+                        </span>
+                        <span className="text-muted">{new Date(b.created_at).toLocaleTimeString("zh-CN")}</span>
+                        {b.status === "done" && (
+                          <a
+                            className="ml-auto text-accent hover:underline"
+                            href={`/api/projects/${projectId}/native-build/${b.id}/download`}
+                            download
+                          >
+                            ⬇ APK{b.artifact_bytes ? `(${Math.round(b.artifact_bytes / 1024 / 1024)}MB)` : ""}
+                          </a>
+                        )}
+                      </div>
+                      {b.error && <p className="text-bad mt-1 break-words">{b.error}</p>}
+                      {b.log_tail && (b.status === "error" || b.status === "building") && (
+                        <details className="mt-1">
+                          <summary className="cursor-pointer text-muted">构建日志尾部</summary>
+                          <pre className="mt-1 p-1.5 bg-bg-deep rounded max-h-32 overflow-auto whitespace-pre-wrap text-[10px]">
+                            {b.log_tail}
+                          </pre>
+                        </details>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className="border border-line rounded-lg p-2.5 opacity-60">
+                  <div className="flex items-center gap-2">
+                    <b> iOS</b>
+                    <span className="text-amber">准备中</span>
+                  </div>
+                  <p className="text-muted mt-1">
+                    构建机(内网 Mac)为 2018 款 macOS 10.13,无法运行 Capacitor 所需的 Xcode 15+;
+                    硬件升级后即启用,当前可用「📦 导出工程」在自己的 Mac 上构建
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
         )}
         {project?.current_version_id && (
           <a

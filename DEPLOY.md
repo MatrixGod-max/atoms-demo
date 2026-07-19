@@ -80,3 +80,13 @@ S3 部署/模板资源功能需要 AWS 凭证链(compose 环境变量或挂载 ~
 
 本机 2 vCPU / 4 GiB,`quark.service` 设了 `MemoryMax=768M`。构建时先停开发进程;
 若 OOM,`NODE_OPTIONS=--max-old-space-size=1536 npm run build`(已有 10G swap 兜底)。
+
+## Android 构建机(v18,ubuntu@10.234.201.214)
+
+- 一次性装机/修复:`NATIVE_BUILD_HOST=ubuntu@10.234.201.214 bash scripts/setup-android-builder.sh`
+  (幂等;本机 ssh 驱动;产物在远端 `~/fusion-android/`:jdk/sdk/template/build.sh,日志 setup.log)
+- 平台 env:`NATIVE_BUILD_HOST`(默认 ubuntu@10.234.201.214);测试/CI 用 `NATIVE_BUILD_MOCK=1`
+- 运维:失败构建的远端现场保留在 `~/fusion-android/ws/<buildId>`(排查后手动删);
+  APK 产物在平台 `DATA_DIR/native-builds/`;磁盘检查 `ssh ... 'du -sh ~/fusion-android'`
+- iOS:`scripts/setup-ios-builder.sh` 对 `NATIVE_BUILD_IOS_HOST` 做环境检查(需 macOS≥13 + Xcode≥15),
+  通过后配置该 env 即启用;当前指定 Mac(10.234.201.128)为 macOS 10.13,检查会明确拒绝

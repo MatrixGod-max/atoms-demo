@@ -43,6 +43,6 @@ jobs:
       - name: E2E smoke (mock pipeline)
         run: |
           DATA_DIR="$RUNNER_TEMP/quark-ci" node scripts/seed-templates.mjs --no-s3
-          DATA_DIR="$RUNNER_TEMP/quark-ci" npm run start -- --port 3456 &
+          DATA_DIR="$RUNNER_TEMP/quark-ci" NATIVE_BUILD_MOCK=1 npm run start -- --port 3456 &
           for i in $(seq 1 30); do curl -fsS http://localhost:3456/api/health && break; sleep 1; done
           BASE_URL=http://localhost:3456 bash scripts/smoke.sh

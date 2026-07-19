@@ -134,8 +134,12 @@ flowchart LR
 - **移动制品 = 可安装 PWA**:发布时服务端自动注入 manifest + Service Worker(navigate 离线回退,
   缓存随新制品发布自动失效)——iOS(Safari 分享→添加到主屏幕)与 Android(Chrome 安装应用)均可装到桌面、
   离线打开,数据走云存储;制品页提供**二维码扫码真机安装**与双端指引;快照页不注册 SW(仅 latest 可安装)
+- **🤖 云端 APK 构建(v18)**:工作台「打包」一键触发——当前版本源码送远程构建机
+  (Capacitor + gradle),2-5 分钟产出 **debug 签名 APK**,下载即可安装(设备允许未知来源);
+  5 积分/次、失败退款;构建日志可查
 - **边界(诚实说明)**:manifest 图标为 SVG(极旧 Android 上安装横幅可能不出现,可手动添加到主屏幕);
-  原生 IPA 需 macOS 构建机、APK 需云构建产线,均列为扩展方向而非本期范围
+  iOS 原生构建接口已就绪但**当前构建机(2018 款 macOS 10.13)无法运行 Xcode 15+**,标「准备中」,
+  期间可「导出工程」(含 Capacitor 配置)在自有 Mac 上构建
 
 ## 制品(Artifact)
 

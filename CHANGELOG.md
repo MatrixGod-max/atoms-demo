@@ -1,5 +1,23 @@
 # Changelog
 
+## v18 — 原生打包:云端 Android APK 构建(2026-07-19)
+
+- 🤖 **移动项目一键出 APK**:工作台「打包」面板触发 → 平台把当前版本源码流式送到远程
+  构建机(tar|ssh)→ Capacitor + gradle `assembleDebug` → APK 取回平台,属主下载直接安装
+  (debug 签名);5 积分/次,失败自动退款;限流 3 次/小时;单项目防并发
+- **构建机(ubuntu@10.234.201.214)**:`scripts/setup-android-builder.sh` 一次性装机(幂等,
+  本机 ssh 驱动,符合地域红线)——用户级 Temurin JDK21(Capacitor 7 要求,不动系统 java)+ Android SDK 35 +
+  **预热模板**(node_modules + android 工程 + gradle 缓存,`rsync --link-dest` 硬链接秒级克隆,
+  增量构建 2-5 分钟);下载走 Tsinghua/npmmirror 镜像 + 214 本地代理
+- 平台侧 `nativeBuild.ts`:进程内构建队列(并发 1、15 分钟超时)、native_builds 表、
+  构建日志入库(UI 可看尾部)、应用标识消毒(appId/appName 防注入)、`NATIVE_BUILD_MOCK=1`
+  全链路 mock(测试/CI/smoke 零依赖构建机)
+- **iOS 如实标注「准备中」**:指定构建机(内网 Mac 10.234.201.128)实测为 2018 款
+  macOS 10.13.6,无法运行 Capacitor 所需 Xcode 15+;provider 接口与
+  `scripts/setup-ios-builder.sh`(环境检查 + 未签名 ipa 构建脚本)已就绪,硬件升级后配
+  `NATIVE_BUILD_IOS_HOST` 即启用;期间用户可「导出工程」自行构建
+- tests/v18.test.ts 4 例(状态机/409/退款/产物);smoke 新增打包→下载 APK 一步
+
 ## v17 — 工程模式:多文件 React 工程 + 真实 code→build→fix 开发流程(2026-07-19)
 
 - 🏗 **产物升级为「文件树 + 构建产物」**:新项目默认工程模式(创建时可切回 ⚡ 单文件)——

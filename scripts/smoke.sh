@@ -277,6 +277,28 @@ EZIP=$(curl -fsS -b "$JAR" -o /tmp/quark-smoke-export.zip -w '%{http_code}' "$BA
 head -c 4 /tmp/quark-smoke-export.zip | od -An -tx1 | grep -q "50 4b 03 04" || fail "export is not a zip"
 rm -f /tmp/quark-smoke-export.zip
 
+step "v18: 原生打包 — mock 构建机出 APK 并可下载(需服务端 NATIVE_BUILD_MOCK=1)"
+NPROJ2=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects" \
+  -H 'content-type: application/json' -d '{"prompt":"smoke 移动打包","platform":"mobile"}' | sed -E 's/.*"id":"([^"]+)".*/\1/')
+NJOB2=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects/$NPROJ2/generate" \
+  -H 'content-type: application/json' -d '{"prompt":"smoke 移动打包"}' | sed -E 's/.*"jobId":"([^"]+)".*/\1/')
+timeout 120 curl -fsS -N -b "$JAR" "$BASE_URL/api/jobs/$NJOB2/stream" | grep -q '"type":"version"' || fail "mobile gen for native build"
+NBID=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects/$NPROJ2/native-build" \
+  -H 'content-type: application/json' -d '{"platform":"android"}' | sed -E 's/.*"id":"([^"]+)".*/\1/')
+[ -n "$NBID" ] || fail "start native build"
+for i in $(seq 1 30); do
+  NBSTATUS=$(curl -fsS -b "$JAR" "$BASE_URL/api/projects/$NPROJ2/native-build" | grep -o '"status":"[a-z]*"' | head -1)
+  echo "$NBSTATUS" | grep -qE 'done|error' && break
+  sleep 1
+done
+echo "$NBSTATUS" | grep -q 'done' || fail "native build should finish done, got $NBSTATUS"
+curl -fsS -b "$JAR" -o /tmp/quark-smoke.apk "$BASE_URL/api/projects/$NPROJ2/native-build/$NBID/download" || fail "download apk"
+head -c 2 /tmp/quark-smoke.apk | grep -q 'PK' || fail "apk magic missing"
+rm -f /tmp/quark-smoke.apk
+WCODE=$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -X POST "$BASE_URL/api/projects/$EPROJ/native-build" \
+  -H 'content-type: application/json' -d '{"platform":"android"}')
+[ "$WCODE" = "400" ] || fail "web project native build should 400, got $WCODE"
+
 step "unauthenticated dashboard access is redirected"
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/dashboard")
 [ "$CODE" = "307" ] || [ "$CODE" = "302" ] || fail "dashboard should redirect, got $CODE"
