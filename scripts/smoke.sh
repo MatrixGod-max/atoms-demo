@@ -42,6 +42,19 @@ PAGE=$(curl -fsS "$BASE_URL/p/$SLUG")
 echo "$PAGE" | grep -q "<!DOCTYPE html>" || fail "public page html"
 echo "$PAGE" | grep -q "window.quark" || fail "storage helper not injected"
 
+step "artifact snapshot and detail page"
+curl -fsS "$BASE_URL/p/$SLUG/v/1" | grep -q "<!DOCTYPE html>" || fail "artifact snapshot v/1"
+curl -fsS "$BASE_URL/artifact/$SLUG" | grep -q "发布历史" || fail "artifact detail page"
+
+step "unpublish hides latest, snapshot, and detail page"
+curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects/$PROJ/publish" \
+  -H 'content-type: application/json' -d '{"action":"unpublish"}' | grep -q '"ok":true' || fail "unpublish"
+[ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/p/$SLUG")" = "404" ] || fail "latest should 404 after unpublish"
+[ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/p/$SLUG/v/1")" = "404" ] || fail "snapshot should 404 after unpublish"
+curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects/$PROJ/publish" \
+  -H 'content-type: application/json' -d '{"action":"publish"}' | grep -q '"ok":true' || fail "republish"
+curl -fsS "$BASE_URL/p/$SLUG/v/1" | grep -q "<!DOCTYPE html>" || fail "snapshot restored after republish"
+
 step "app KV set/get"
 curl -fsS -X PUT "$BASE_URL/api/apps/$SLUG/kv/count" \
   -H 'content-type: application/json' -d '{"v":"42"}' | grep -q '"ok":true' || fail "kv put"

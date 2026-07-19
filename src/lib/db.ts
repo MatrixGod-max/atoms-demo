@@ -1,4 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -68,6 +69,16 @@ function createDb(): DatabaseSync {
       updated_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS artifacts (
+      id         TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      version_id TEXT NOT NULL REFERENCES app_versions(id),
+      seq        INTEGER NOT NULL,
+      notes      TEXT,
+      created_at INTEGER NOT NULL,
+      UNIQUE(project_id, seq)
+    );
+
     CREATE TABLE IF NOT EXISTS app_kv (
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
       k          TEXT NOT NULL,
@@ -84,7 +95,26 @@ function createDb(): DatabaseSync {
   `);
   ensureColumn(db, "projects", "in_gallery", "in_gallery INTEGER NOT NULL DEFAULT 1");
   ensureColumn(db, "users", "is_demo", "is_demo INTEGER NOT NULL DEFAULT 0");
+  backfillArtifacts(db);
   return db;
+}
+
+/** Idempotent: projects published before the artifact concept existed get artifact #1. */
+function backfillArtifacts(db: DatabaseSync) {
+  const rows = db
+    .prepare(
+      `SELECT p.id AS project_id, p.published_version_id AS version_id, v.prompt
+       FROM projects p JOIN app_versions v ON v.id = p.published_version_id
+       WHERE p.published_version_id IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM artifacts a WHERE a.project_id = p.id)`
+    )
+    .all() as { project_id: string; version_id: string; prompt: string }[];
+  const insert = db.prepare(
+    "INSERT INTO artifacts (id, project_id, version_id, seq, notes, created_at) VALUES (?, ?, ?, 1, ?, ?)"
+  );
+  for (const r of rows) {
+    insert.run(`a_${randomBytes(9).toString("base64url")}`, r.project_id, r.version_id, r.prompt, Date.now());
+  }
 }
 
 /** Additive migration: CREATE TABLE IF NOT EXISTS won't extend existing tables. */

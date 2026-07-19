@@ -8,17 +8,17 @@ export function proxy(req: NextRequest) {
   const host = (req.headers.get("host") || "").toLowerCase();
   const { pathname } = req.nextUrl;
 
-  // Published-apps origin: isolated from the platform. Serves only apps and their KV API.
+  // Published-apps origin: isolated from the platform. Serves only apps, artifact snapshots, and their KV API.
   if (host === APPS_HOST) {
     if (pathname.startsWith("/api/apps/")) return NextResponse.next();
-    const short = pathname.match(/^\/([a-z0-9]{4,16})$/);
-    if (short) return NextResponse.rewrite(new URL(`/p/${short[1]}`, req.url));
-    if (/^\/p\/[a-z0-9]+$/.test(pathname)) return NextResponse.next();
+    const short = pathname.match(/^\/([a-z0-9]{4,16})(\/v\/[0-9]{1,4})?$/);
+    if (short) return NextResponse.rewrite(new URL(`/p/${short[1]}${short[2] ?? ""}`, req.url));
+    if (/^\/p\/[a-z0-9]+(\/v\/[0-9]{1,4})?$/.test(pathname)) return NextResponse.next();
     return NextResponse.redirect(PLATFORM_ORIGIN, 302);
   }
 
   // Platform origin: legacy /p/* links permanently move to the apps origin (prod only).
-  if (process.env.APPS_REDIRECT === "1" && /^\/p\/[a-z0-9]+$/.test(pathname)) {
+  if (process.env.APPS_REDIRECT === "1" && /^\/p\/[a-z0-9]+(\/v\/[0-9]{1,4})?$/.test(pathname)) {
     return NextResponse.redirect(`https://${APPS_HOST}${pathname.slice(2)}`, 301);
   }
 

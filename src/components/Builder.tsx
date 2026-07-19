@@ -416,6 +416,13 @@ export default function Builder({ projectId }: { projectId: string }) {
             >
               {copied ? "已复制 ✓" : `⚛ ${publishedUrl.replace(/^https?:\/\//, "")}`}
             </button>
+            <Link
+              href={`/artifact/${project?.slug}`}
+              className="btn-ghost px-3 py-1.5 text-xs max-sm:hidden"
+              title="制品发布历史"
+            >
+              制品页 ↗
+            </Link>
             <label className="flex items-center gap-1.5 text-xs text-muted cursor-pointer max-sm:hidden" title="展示在公开展厅 /explore">
               <input
                 type="checkbox"

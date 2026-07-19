@@ -25,6 +25,9 @@ export default function AppCard({ app, url }: { app: GalleryApp; url: string }) 
           <Link href={`/remix/${app.slug}`} className="btn-ghost px-3 py-1.5 text-xs text-accent">
             ⚛ Remix
           </Link>
+          <Link href={`/artifact/${app.slug}`} className="text-xs text-muted hover:text-ink px-1">
+            详情
+          </Link>
           <span className="ml-auto font-mono text-[10px] text-muted">
             {new Date(app.updated_at).toLocaleDateString("zh-CN")}
           </span>
