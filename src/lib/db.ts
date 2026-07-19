@@ -94,6 +94,7 @@ function createDb(): DatabaseSync {
     CREATE INDEX IF NOT EXISTS idx_projects_user ON projects(user_id, updated_at);
   `);
   ensureColumn(db, "projects", "in_gallery", "in_gallery INTEGER NOT NULL DEFAULT 1");
+  ensureColumn(db, "projects", "platform", "platform TEXT NOT NULL DEFAULT 'web' CHECK (platform IN ('web','mobile'))");
   ensureColumn(db, "users", "is_demo", "is_demo INTEGER NOT NULL DEFAULT 0");
   backfillArtifacts(db);
   return db;

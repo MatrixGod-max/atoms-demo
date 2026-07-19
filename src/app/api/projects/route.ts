@@ -20,27 +20,24 @@ export async function POST(req: Request) {
   if (!user) return NextResponse.json({ error: "未登录" }, { status: 401 });
   const blocked = demoGuard(user);
   if (blocked) return NextResponse.json({ error: blocked }, { status: 403 });
-  const { prompt, remixSlug } = await req.json().catch(() => ({}));
+  const { prompt, remixSlug, platform } = await req.json().catch(() => ({}));
+  const chosenPlatform = platform === "mobile" ? "mobile" : "web";
 
   // Fork a published app into a new project of your own (v1 = its published HTML).
   if (typeof remixSlug === "string" && remixSlug) {
     const source = db
       .prepare(
-        `SELECT p.name, v.html, v.spec FROM projects p JOIN app_versions v ON v.id = p.published_version_id
+        `SELECT p.name, p.platform, v.html, v.spec FROM projects p JOIN app_versions v ON v.id = p.published_version_id
          WHERE p.slug = ? AND p.published_version_id IS NOT NULL`
       )
-      .get(remixSlug) as { name: string; html: string; spec: string | null } | undefined;
+      .get(remixSlug) as { name: string; platform: string; html: string; spec: string | null } | undefined;
     if (!source) return NextResponse.json({ error: "源应用不存在或未发布" }, { status: 404 });
     const id = newId("p");
     const versionId = newId("v");
     const t = now();
-    db.prepare("INSERT INTO projects (id, user_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(
-      id,
-      user.id,
-      `Remix · ${source.name}`.slice(0, 40),
-      t,
-      t
-    );
+    db.prepare(
+      "INSERT INTO projects (id, user_id, name, platform, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(id, user.id, `Remix · ${source.name}`.slice(0, 40), source.platform, t, t);
     db.prepare(
       "INSERT INTO app_versions (id, project_id, num, html, spec, review_notes, prompt, created_at) VALUES (?, ?, 1, ?, ?, ?, ?, ?)"
     ).run(versionId, id, source.html, source.spec, `Remix 自 /${remixSlug}`, `Remix 自 ${source.name}`, t);
@@ -60,7 +57,7 @@ export async function POST(req: Request) {
   const id = newId("p");
   const t = now();
   db.prepare(
-    "INSERT INTO projects (id, user_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
-  ).run(id, user.id, prompt.trim().slice(0, 30), t, t);
+    "INSERT INTO projects (id, user_id, name, platform, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+  ).run(id, user.id, prompt.trim().slice(0, 30), chosenPlatform, t, t);
   return NextResponse.json({ id, prompt: prompt.trim() });
 }

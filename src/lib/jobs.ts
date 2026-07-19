@@ -159,8 +159,8 @@ class JobRunner {
     this.setStatus(job.id, "running");
     this.emit(job, { type: "job_state", status: "running" });
     try {
-      const project = db.prepare("SELECT current_version_id FROM projects WHERE id = ?").get(job.projectId) as
-        | { current_version_id: string | null }
+      const project = db.prepare("SELECT current_version_id, platform FROM projects WHERE id = ?").get(job.projectId) as
+        | { current_version_id: string | null; platform: "web" | "mobile" }
         | undefined;
       if (!project) throw new Error("项目已被删除");
       const currentVersion = project.current_version_id
@@ -175,6 +175,7 @@ class JobRunner {
         history: job.history,
         currentHtml: currentVersion?.html ?? null,
         specJson: currentVersion?.spec ?? null,
+        platform: project.platform === "mobile" ? "mobile" : "web",
       })) {
         if (event.type === "plan") spec = event.spec;
         if (event.type === "stage" && event.status === "start") {

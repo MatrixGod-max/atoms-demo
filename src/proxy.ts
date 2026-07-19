@@ -11,9 +11,9 @@ export function proxy(req: NextRequest) {
   // Published-apps origin: isolated from the platform. Serves only apps, artifact snapshots, and their KV API.
   if (host === APPS_HOST) {
     if (pathname.startsWith("/api/apps/")) return NextResponse.next();
-    const short = pathname.match(/^\/([a-z0-9]{4,16})(\/v\/[0-9]{1,4})?$/);
+    const short = pathname.match(/^\/([a-z0-9]{4,16})(\/v\/[0-9]{1,4}|\/sw\.js)?$/);
     if (short) return NextResponse.rewrite(new URL(`/p/${short[1]}${short[2] ?? ""}`, req.url));
-    if (/^\/p\/[a-z0-9]+(\/v\/[0-9]{1,4})?$/.test(pathname)) return NextResponse.next();
+    if (/^\/p\/[a-z0-9]+(\/v\/[0-9]{1,4}|\/sw\.js)?$/.test(pathname)) return NextResponse.next();
     return NextResponse.redirect(PLATFORM_ORIGIN, 302);
   }
 

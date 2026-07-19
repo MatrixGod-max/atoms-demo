@@ -18,8 +18,31 @@ function remixBadge(slug: string): string {
   return `<script>(function(){function add(){var d=document.createElement('div');d.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99999;display:flex;align-items:center;gap:6px;background:rgba(13,14,28,.92);color:#edebff;font:12px/1 -apple-system,sans-serif;padding:7px 10px;border-radius:99px;border:1px solid rgba(139,124,255,.35);box-shadow:0 2px 12px rgba(0,0,0,.25)';d.innerHTML='<a href="${platform}/remix/${slug}" target="_blank" rel="noopener" style="color:#edebff;text-decoration:none">\\u269b \\u7528 Quark \\u6784\\u5efa \\u00b7 <span style="color:#8b7cff">Remix</span></a><span style="cursor:pointer;color:#8d8aa8;padding:0 2px" aria-label="\\u5173\\u95ed">\\u00d7</span>';d.lastChild.onclick=function(){d.remove()};document.body.appendChild(d)}if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',add)}else{add()}})()</script>`;
 }
 
-export function serveAppHtml(html: string, slug: string): Response {
-  const helper = storageHelper(slug) + remixBadge(slug);
+/**
+ * Mobile artifacts are installable PWAs: manifest link + missing mobile meta +
+ * service-worker registration (latest only — snapshots stay plain documents).
+ */
+function pwaHelper(slug: string, html: string, snapshot: boolean): string {
+  let extra = `<link rel="manifest" href="/api/apps/${slug}/manifest.webmanifest">`;
+  if (!/name="theme-color"/i.test(html)) extra += `<meta name="theme-color" content="#0d0e1c">`;
+  if (!/apple-mobile-web-app-capable/i.test(html)) {
+    extra += `<meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">`;
+  }
+  if (!snapshot) {
+    // sw path/scope derive from the page path, so both the apps origin (/{slug}) and dev (/p/{slug}) work.
+    extra += `<script>if('serviceWorker' in navigator){var p=location.pathname.replace(/\\/$/,'');navigator.serviceWorker.register(p+'/sw.js',{scope:p}).catch(function(){})}</script>`;
+  }
+  return extra;
+}
+
+export interface ServeOptions {
+  platform?: "web" | "mobile";
+  snapshot?: boolean;
+}
+
+export function serveAppHtml(html: string, slug: string, opts: ServeOptions = {}): Response {
+  let helper = storageHelper(slug) + remixBadge(slug);
+  if (opts.platform === "mobile") helper += pwaHelper(slug, html, !!opts.snapshot);
   const out = /<head[^>]*>/i.test(html) ? html.replace(/<head([^>]*)>/i, `<head$1>${helper}`) : helper + html;
   return new Response(out, {
     headers: {

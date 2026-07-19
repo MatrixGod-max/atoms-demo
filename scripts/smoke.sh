@@ -60,6 +60,26 @@ curl -fsS -X PUT "$BASE_URL/api/apps/$SLUG/kv/count" \
   -H 'content-type: application/json' -d '{"v":"42"}' | grep -q '"ok":true' || fail "kv put"
 curl -fsS "$BASE_URL/api/apps/$SLUG/kv/count" | grep -q '"v":"42"' || fail "kv get"
 
+step "mobile project: PWA artifact"
+MPROJ=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects" \
+  -H 'content-type: application/json' -d '{"prompt":"smoke 移动应用","platform":"mobile"}' | sed -E 's/.*"id":"([^"]+)".*/\1/')
+MJOB=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects/$MPROJ/generate" \
+  -H 'content-type: application/json' -d '{"prompt":"smoke 移动应用"}' | sed -E 's/.*"jobId":"([^"]+)".*/\1/')
+timeout 120 curl -fsS -N -b "$JAR" "$BASE_URL/api/jobs/$MJOB/stream" | grep -q '"type":"version"' || fail "mobile generate"
+MSLUG=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects/$MPROJ/publish" \
+  -H 'content-type: application/json' -d '{"action":"publish"}' | sed -E 's/.*"slug":"([^"]+)".*/\1/')
+MPAGE=$(curl -fsS "$BASE_URL/p/$MSLUG")
+echo "$MPAGE" | grep -q 'rel="manifest"' || fail "mobile page missing manifest link"
+echo "$MPAGE" | grep -q "serviceWorker" || fail "mobile page missing SW registration"
+curl -fsS "$BASE_URL/api/apps/$MSLUG/manifest.webmanifest" | grep -q '"standalone"' || fail "manifest route"
+curl -fsS "$BASE_URL/api/apps/$MSLUG/icon.svg" | grep -q "<svg" || fail "icon route"
+curl -fsS "$BASE_URL/p/$MSLUG/sw.js" | grep -q "addEventListener" || fail "sw route"
+curl -fsS "$BASE_URL/p/$MSLUG/v/1" | grep -q 'rel="manifest"' || fail "mobile snapshot manifest"
+if curl -fsS "$BASE_URL/p/$MSLUG/v/1" | grep -q "serviceWorker"; then fail "snapshot must not register SW"; fi
+
+step "web project has no PWA injection (regression)"
+if curl -fsS "$BASE_URL/p/$SLUG" | grep -q 'rel="manifest"'; then fail "web app must not have manifest"; fi
+
 step "unauthenticated dashboard access is redirected"
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/dashboard")
 [ "$CODE" = "307" ] || [ "$CODE" = "302" ] || fail "dashboard should redirect, got $CODE"

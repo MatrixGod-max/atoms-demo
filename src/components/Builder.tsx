@@ -26,6 +26,7 @@ interface ProjectDetail {
     current_version_id: string | null;
     published_version_id: string | null;
     in_gallery: number;
+    platform: "web" | "mobile";
   };
   messages: Message[];
   versions: Version[];
@@ -383,6 +384,11 @@ export default function Builder({ projectId }: { projectId: string }) {
               setRenaming(true);
             }}
           >
+            {project && (
+              <span className="mr-1.5" title={project.platform === "mobile" ? "移动应用" : "网页应用"}>
+                {project.platform === "mobile" ? "📱" : "🌐"}
+              </span>
+            )}
             {project?.name ?? "加载中…"}
           </h1>
         )}
@@ -570,13 +576,27 @@ export default function Builder({ projectId }: { projectId: string }) {
                 <div className="h-full flex flex-col">
                   <p className="px-3 py-1 text-[11px] text-muted border-b border-line shrink-0">
                     沙箱预览 · 预览中数据不持久,发布后云存储生效
+                    {project?.platform === "mobile" && " · 390×844 手机视口"}
                   </p>
-                  <iframe
-                    className="w-full flex-1 bg-white"
-                    sandbox="allow-scripts allow-forms allow-modals allow-popups"
-                    srcDoc={html}
-                    title="应用预览"
-                  />
+                  {project?.platform === "mobile" ? (
+                    <div className="flex-1 min-h-0 flex items-center justify-center p-4 overflow-auto">
+                      <div className="w-[390px] max-w-full h-full max-h-[780px] rounded-[32px] border-[6px] border-[#2a2d4a] shadow-2xl overflow-hidden bg-white shrink-0">
+                        <iframe
+                          className="w-full h-full bg-white"
+                          sandbox="allow-scripts allow-forms allow-modals allow-popups"
+                          srcDoc={html}
+                          title="应用预览"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <iframe
+                      className="w-full flex-1 bg-white"
+                      sandbox="allow-scripts allow-forms allow-modals allow-popups"
+                      srcDoc={html}
+                      title="应用预览"
+                    />
+                  )}
                 </div>
               ) : (
                 <div className="h-full flex flex-col items-center justify-center text-muted text-sm gap-2">

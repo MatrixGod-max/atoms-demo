@@ -6,11 +6,11 @@ import { useState } from "react";
 const EXAMPLES = ["一个番茄钟专注应用", "极简记账本,支持分类统计", "习惯打卡日历", "团队站会抽签转盘"];
 
 /** Creates a project from a prompt and jumps into the builder. */
-export async function launchProject(prompt: string): Promise<string | null> {
+export async function launchProject(prompt: string, platform: "web" | "mobile" = "web"): Promise<string | null> {
   const res = await fetch("/api/projects", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify({ prompt, platform }),
   });
   if (!res.ok) return null;
   const { id } = await res.json();
@@ -27,6 +27,7 @@ export default function PromptLauncher({
 }) {
   const router = useRouter();
   const [prompt, setPrompt] = useState("");
+  const [platform, setPlatform] = useState<"web" | "mobile">("web");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -35,12 +36,12 @@ export default function PromptLauncher({
     if (!trimmed || busy) return;
     setError("");
     if (!loggedIn) {
-      sessionStorage.setItem("quark_boot", trimmed);
+      sessionStorage.setItem("quark_boot", JSON.stringify({ prompt: trimmed, platform }));
       router.push("/register?next=launch");
       return;
     }
     setBusy(true);
-    const id = await launchProject(trimmed);
+    const id = await launchProject(trimmed, platform);
     if (id) {
       router.push(`/project/${id}`);
     } else {
@@ -62,8 +63,24 @@ export default function PromptLauncher({
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) submit();
           }}
         />
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-muted">⌘/Ctrl + Enter 直接开始</span>
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center rounded-lg border border-line overflow-hidden text-xs">
+            {(
+              [
+                ["web", "🌐 网页应用"],
+                ["mobile", "📱 移动应用"],
+              ] as const
+            ).map(([p, label]) => (
+              <button
+                key={p}
+                type="button"
+                className={`px-3 py-1.5 transition-colors ${platform === p ? "bg-accent-soft text-ink" : "text-muted hover:text-ink"}`}
+                onClick={() => setPlatform(p)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <button className="btn-primary px-5 py-2 text-sm" onClick={submit} disabled={busy || !prompt.trim()}>
             {busy ? "创建中…" : "开始构建 →"}
           </button>

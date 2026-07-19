@@ -11,7 +11,7 @@ const CHROME = process.env.CHROME_PATH || "/usr/bin/google-chrome-stable";
 const TOTAL_TIMEOUT_MS = 25_000;
 const SETTLE_MS = 1_500;
 
-async function run(html: string): Promise<ValidationResult> {
+async function run(html: string, platform: "web" | "mobile"): Promise<ValidationResult> {
   let browser: Awaited<ReturnType<typeof puppeteer.launch>> | undefined;
   try {
     browser = await puppeteer.launch({
@@ -20,6 +20,9 @@ async function run(html: string): Promise<ValidationResult> {
       args: ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-extensions", "--mute-audio"],
     });
     const page = await browser.newPage();
+    if (platform === "mobile") {
+      await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+    }
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(`未捕获异常: ${e instanceof Error ? e.message : String(e)}`));
     page.on("console", (msg) => {
@@ -34,10 +37,10 @@ async function run(html: string): Promise<ValidationResult> {
 }
 
 /** Load the generated app in headless Chrome and collect runtime errors. */
-export async function validateHtml(html: string): Promise<ValidationResult> {
+export async function validateHtml(html: string, platform: "web" | "mobile" = "web"): Promise<ValidationResult> {
   try {
     return await Promise.race<ValidationResult>([
-      run(html),
+      run(html, platform),
       new Promise((resolve) => setTimeout(() => resolve({ ok: true, errors: [], skipped: true }), TOTAL_TIMEOUT_MS)),
     ]);
   } catch {

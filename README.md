@@ -32,6 +32,19 @@ flowchart LR
     H -->|Remix| A
 ```
 
+## 移动应用工作流与 PWA 制品
+
+新建项目时可选 **📱 移动应用**,整条链路随之切换:
+
+- **生成工作流**:Planner 以单手主流程/层级 ≤3/离线可用产规格;Engineer 追加移动规则(390px 竖屏优先、
+  `viewport-fit=cover` + 安全区、触控目标 ≥44px、禁 hover 依赖、底部拇指区、`theme-color`/apple meta);
+  Validator 以 **390×844 触屏视口**真实运行检验;工作台预览渲染在手机框中
+- **移动制品 = 可安装 PWA**:发布时服务端自动注入 manifest + Service Worker(navigate 离线回退,
+  缓存随新制品发布自动失效)——iOS(Safari 分享→添加到主屏幕)与 Android(Chrome 安装应用)均可装到桌面、
+  离线打开,数据走云存储;制品页提供**二维码扫码真机安装**与双端指引;快照页不注册 SW(仅 latest 可安装)
+- **边界(诚实说明)**:manifest 图标为 SVG(极旧 Android 上安装横幅可能不出现,可手动添加到主屏幕);
+  原生 IPA 需 macOS 构建机、APK 需云构建产线,均列为扩展方向而非本期范围
+
 ## 制品(Artifact)
 
 发布采用 **registry 语义**:开发版本(v1…vN)是工作台内部概念,**每次发布会产出一个不可变制品**(#1、#2…):

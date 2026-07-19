@@ -47,7 +47,18 @@ function AuthFormInner({ mode }: { mode: "login" | "register" }) {
       const boot = sessionStorage.getItem("quark_boot");
       if (boot) {
         sessionStorage.removeItem("quark_boot");
-        const id = await launchProject(boot);
+        let prompt = boot;
+        let platform: "web" | "mobile" = "web";
+        try {
+          const parsed = JSON.parse(boot);
+          if (parsed.prompt) {
+            prompt = parsed.prompt;
+            platform = parsed.platform === "mobile" ? "mobile" : "web";
+          }
+        } catch {
+          // legacy plain-string boot value
+        }
+        const id = await launchProject(prompt, platform);
         if (id) {
           router.push(`/project/${id}`);
           return;

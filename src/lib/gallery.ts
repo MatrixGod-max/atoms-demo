@@ -5,17 +5,18 @@ export interface GalleryApp {
   name: string;
   summary: string;
   updated_at: number;
+  platform: "web" | "mobile";
 }
 
 export function galleryApps(limit: number): GalleryApp[] {
   const rows = db
     .prepare(
-      `SELECT p.slug, p.name, p.updated_at, v.spec
+      `SELECT p.slug, p.name, p.updated_at, p.platform, v.spec
        FROM projects p JOIN app_versions v ON v.id = p.published_version_id
        WHERE p.slug IS NOT NULL AND p.published_version_id IS NOT NULL AND p.in_gallery = 1
        ORDER BY p.updated_at DESC LIMIT ?`
     )
-    .all(limit) as { slug: string; name: string; updated_at: number; spec: string | null }[];
+    .all(limit) as { slug: string; name: string; updated_at: number; platform: "web" | "mobile"; spec: string | null }[];
   return rows.map((r) => {
     let summary = "";
     try {
@@ -23,7 +24,7 @@ export function galleryApps(limit: number): GalleryApp[] {
     } catch {
       // keep empty summary on malformed spec
     }
-    return { slug: r.slug, name: r.name, summary, updated_at: r.updated_at };
+    return { slug: r.slug, name: r.name, summary, updated_at: r.updated_at, platform: r.platform };
   });
 }
 

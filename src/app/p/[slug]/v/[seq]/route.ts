@@ -10,13 +10,13 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string; 
   if (!Number.isInteger(seqNum) || seqNum < 1) return notFoundApp();
   const row = db
     .prepare(
-      `SELECT v.html FROM projects p
+      `SELECT v.html, p.platform FROM projects p
        JOIN artifacts a ON a.project_id = p.id AND a.seq = ?
        JOIN app_versions v ON v.id = a.version_id
        WHERE p.slug = ? AND p.published_version_id IS NOT NULL`
     )
-    .get(seqNum, slug) as { html: string } | undefined;
+    .get(seqNum, slug) as { html: string; platform: "web" | "mobile" } | undefined;
 
   if (!row) return notFoundApp();
-  return serveAppHtml(row.html, slug);
+  return serveAppHtml(row.html, slug, { platform: row.platform, snapshot: true });
 }

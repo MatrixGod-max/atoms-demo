@@ -96,6 +96,14 @@ export function extractJson(text: string): string {
   return text.slice(start, end + 1);
 }
 
+const ENGINEER_RULES_MOBILE_EXTRA = `
+移动应用附加规则(本项目是移动应用,同样必须严格遵守):
+A. 以 390px 宽竖屏为第一目标设计,布局纵向流动;<meta name="viewport"> 必须含 viewport-fit=cover。
+B. 全部可点击目标尺寸 ≥44×44px;交互不得依赖 hover;主操作放在页面底部拇指可达区。
+C. 用 env(safe-area-inset-top/bottom) 处理刘海与 Home 指示条的安全区留白。
+D. 加入 <meta name="theme-color"> 与 <meta name="apple-mobile-web-app-capable" content="yes">、<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">。
+E. 动画只用 transform/opacity(不触发重排);列表滚动容器用 -webkit-overflow-scrolling:touch。`;
+
 const ENGINEER_RULES = `输出规则(必须严格遵守):
 1. 只输出一个完整的、自包含的 HTML 文件,从 <!DOCTYPE html> 开始。不要输出任何 markdown 代码围栏或解释文字。
 2. 所有 CSS 和 JavaScript 必须内联在该文件中,禁止引用任何外部资源(CDN、字体、图片 URL 等),图标可用 emoji 或内联 SVG。
@@ -110,6 +118,7 @@ export interface PipelineInput {
   history: { role: "user" | "agent"; content: string }[];
   currentHtml: string | null;
   specJson: string | null;
+  platform: "web" | "mobile";
 }
 
 /** Deterministic, LLM-free pipeline for tests/CI (AGENT_MOCK=1). */
@@ -130,8 +139,12 @@ async function* runMockPipeline(input: PipelineInput): AsyncGenerator<AgentEvent
     yield { type: "stage", stage: "planner", status: "done", info: spec.name };
   }
   yield { type: "stage", stage: "engineer", status: "start" };
+  const mobileMeta =
+    input.platform === "mobile"
+      ? `<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#0d0e1c"><meta name="apple-mobile-web-app-capable" content="yes">`
+      : `<meta name="viewport" content="width=device-width, initial-scale=1">`;
   let html = `<!DOCTYPE html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mock 计数器</title>
+<html lang="zh-CN"><head><meta charset="utf-8">${mobileMeta}<title>Mock 计数器</title>
 <style>body{font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:16px}button{font-size:20px;padding:8px 24px}</style>
 </head><body><h1 id="n">0</h1><button id="b">+1</button>
 ${broken ? "<script>throw new Error('mock runtime failure')<\/script>" : ""}
@@ -156,14 +169,14 @@ ${broken ? "<script>throw new Error('mock runtime failure')<\/script>" : ""}
 
   yield { type: "stage", stage: "validator", status: "start" };
   let validatorNotes = "运行通过,无报错";
-  const v1 = await validateHtml(html);
+  const v1 = await validateHtml(html, input.platform);
   if (v1.skipped) {
     validatorNotes = "校验环境不可用,跳过";
   } else if (!v1.ok) {
     html = html.replace(/<script>throw[^<]*<\/script>/, "");
     yield { type: "code_reset" };
     yield { type: "code_delta", delta: html };
-    const v2 = await validateHtml(html);
+    const v2 = await validateHtml(html, input.platform);
     validatorNotes = `捕获 ${v1.errors.length} 个运行时错误并修复(复验${v2.ok ? "通过" : "未过"})`;
   }
   yield { type: "stage", stage: "validator", status: "done", info: validatorNotes };
@@ -180,15 +193,20 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
   let spec: AppSpec | null = input.specJson ? (JSON.parse(input.specJson) as AppSpec) : null;
 
   // ---- Stage 1: Planner (first generation only) ----
+  const isMobile = input.platform === "mobile";
   if (!isIteration) {
     yield { type: "stage", stage: "planner", status: "start" };
     const raw = await chat(
       [
         {
           role: "system",
-          content: `你是 Quark 平台的产品规划智能体(Planner)。用户会描述一个网页应用的想法,你需要输出一份精炼的产品规格,严格输出 JSON(无其他文字):
+          content: `你是 Quark 平台的产品规划智能体(Planner)。用户会描述一个${isMobile ? "移动" : "网页"}应用的想法,你需要输出一份精炼的产品规格,严格输出 JSON(无其他文字):
 {"name": "应用名(<=12字)", "summary": "一句话定位", "features": ["3-5个核心功能点"], "design": "一句话视觉方向"}
-语言与用户输入一致。规格要克制务实:只保留一次生成能落地的功能。`,
+语言与用户输入一致。规格要克制务实:只保留一次生成能落地的功能。${
+            isMobile
+              ? "\n这是移动应用:核心流程必须单手可完成、页面层级 ≤3,规格中体现触控优先与离线可用性。"
+              : ""
+          }`,
         },
         { role: "user", content: input.request },
       ],
@@ -203,7 +221,10 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
   // ---- Stage 2: Engineer (streamed) ----
   yield { type: "stage", stage: "engineer", status: "start" };
   const engineerMessages: ChatMessage[] = [
-    { role: "system", content: `你是 Quark 平台的工程师智能体(Engineer),负责把产品需求实现为单文件网页应用。\n${ENGINEER_RULES}` },
+    {
+      role: "system",
+      content: `你是 Quark 平台的工程师智能体(Engineer),负责把产品需求实现为单文件${isMobile ? "移动" : "网页"}应用。\n${ENGINEER_RULES}${isMobile ? ENGINEER_RULES_MOBILE_EXTRA : ""}`,
+    },
   ];
   if (isIteration) {
     const recent = input.history
@@ -272,7 +293,7 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
   // ---- Stage 4: Validator (runtime check in headless Chrome, one repair round) ----
   yield { type: "stage", stage: "validator", status: "start" };
   let validatorNotes: string;
-  const v1 = await validateHtml(html);
+  const v1 = await validateHtml(html, input.platform);
   if (v1.skipped) {
     validatorNotes = "校验环境不可用,跳过";
   } else if (v1.ok) {
@@ -281,7 +302,10 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
     let fixed = "";
     yield { type: "code_reset" };
     for await (const delta of chatStream([
-      { role: "system", content: `你是 Quark 平台的工程师智能体(Engineer)。\n${ENGINEER_RULES}` },
+      {
+        role: "system",
+        content: `你是 Quark 平台的工程师智能体(Engineer)。\n${ENGINEER_RULES}${isMobile ? ENGINEER_RULES_MOBILE_EXTRA : ""}`,
+      },
       {
         role: "user",
         content: `以下单文件应用在真实浏览器中运行时出现了错误。\n\n运行时错误:\n${v1.errors
@@ -294,7 +318,7 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
     }
     fixed = stripFences(fixed);
     if (/^<!DOCTYPE html>/i.test(fixed) && fixed.length > 500) {
-      const v2 = await validateHtml(fixed);
+      const v2 = await validateHtml(fixed, input.platform);
       if (v2.skipped || v2.ok) {
         html = fixed;
         validatorNotes = `捕获 ${v1.errors.length} 个运行时错误并修复,复验通过`;
