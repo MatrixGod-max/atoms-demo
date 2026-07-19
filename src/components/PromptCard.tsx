@@ -353,18 +353,25 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
             </div>
             <button
               type="button"
-              aria-label={speech.state === "listening" ? "停止语音输入" : "语音输入"}
+              aria-label={speech.state === "listening" ? "停止录音" : "语音输入"}
               title={
                 speech.state === "unsupported"
-                  ? "当前浏览器不支持语音输入,建议使用 Chrome"
-                  : speech.error || (speech.state === "listening" ? "正在听,点击停止" : "语音输入(中文)")
+                  ? "当前浏览器不支持录音(需要 MediaRecorder)"
+                  : speech.error ||
+                    (speech.state === "listening"
+                      ? "录音中,点击停止(最长 60 秒)"
+                      : speech.state === "transcribing"
+                        ? "转写中…"
+                        : "语音输入(中文,自托管识别)")
               }
               className={`w-9 h-9 rounded-full flex items-center justify-center transition-colors ${
                 speech.state === "listening"
                   ? "bg-bad/10 text-bad animate-pulse"
-                  : speech.state === "unsupported"
-                    ? "text-muted/40 cursor-not-allowed"
-                    : "text-muted hover:text-ink hover:bg-bg-deep"
+                  : speech.state === "transcribing"
+                    ? "text-amber animate-pulse cursor-wait"
+                    : speech.state === "unsupported"
+                      ? "text-muted/40 cursor-not-allowed"
+                      : "text-muted hover:text-ink hover:bg-bg-deep"
               }`}
               onClick={() => speech.state !== "unsupported" && speech.toggle()}
             >

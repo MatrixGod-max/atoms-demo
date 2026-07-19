@@ -301,6 +301,16 @@ WCODE=$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -X POST "$BASE_URL/api/
   -H 'content-type: application/json' -d '{"platform":"android"}')
 [ "$WCODE" = "400" ] || fail "web project native build should 400, got $WCODE"
 
+step "v20: 语音转写代理 — mock 转写与未登录拒绝(需服务端 SPEECH_MOCK=1)"
+head -c 4000 /dev/urandom > /tmp/quark-smoke-audio.webm
+SPTEXT=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/speech/transcribe" \
+  -F "audio=@/tmp/quark-smoke-audio.webm;type=audio/webm")
+echo "$SPTEXT" | grep -q 'mock 语音转写结果' || fail "speech mock transcribe, got $SPTEXT"
+SPCODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/api/speech/transcribe" \
+  -F "audio=@/tmp/quark-smoke-audio.webm;type=audio/webm")
+[ "$SPCODE" = "401" ] || fail "unauth speech should 401, got $SPCODE"
+rm -f /tmp/quark-smoke-audio.webm
+
 step "unauthenticated dashboard access is redirected"
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/dashboard")
 [ "$CODE" = "307" ] || [ "$CODE" = "302" ] || fail "dashboard should redirect, got $CODE"

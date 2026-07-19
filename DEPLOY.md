@@ -90,3 +90,11 @@ S3 部署/模板资源功能需要 AWS 凭证链(compose 环境变量或挂载 ~
   APK 产物在平台 `DATA_DIR/native-builds/`;磁盘检查 `ssh ... 'du -sh ~/fusion-android'`
 - iOS:`scripts/setup-ios-builder.sh` 对 `NATIVE_BUILD_IOS_HOST` 做环境检查(需 macOS≥13 + Xcode≥15),
   通过后配置该 env 即启用;当前指定 Mac(10.234.201.128)为 macOS 10.13,检查会明确拒绝
+
+## 语音转写服务(v20,ubuntu@10.234.201.214:8022)
+
+- 装机/修复:`bash scripts/setup-speech-server.sh`(幂等;写 214 的 venv/server.py/systemd,
+  并把 `SPEECH_SERVICE_URL/TOKEN` 写入本地 .env 与 .env.production;token 不回显)
+- 运维:`ssh ... 'sudo systemctl status|restart fusion-speech'`;日志 `sudo journalctl -u fusion-speech -n 50`;
+  换模型改 `/etc/fusion-speech.env` 的 `WHISPER_MODEL`(如 large-v3-turbo,需评估 CPU 时延或迁 GPU)后重启
+- 平台侧:未配置 `SPEECH_SERVICE_URL` 时接口返回 503「语音服务未启用」;测试/CI 用 `SPEECH_MOCK=1`

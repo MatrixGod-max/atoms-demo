@@ -56,3 +56,4 @@ docs/*.tmp.png
 .next-dev/
 .next-ci/
 .e2e-data/
+.smoke-data*/

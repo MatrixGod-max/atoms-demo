@@ -1716,14 +1716,21 @@ export default function Builder({ projectId }: { projectId: string }) {
                 className={`px-3 rounded-lg border text-sm transition-colors ${
                   speech.state === "listening"
                     ? "border-bad/50 text-bad animate-pulse"
-                    : speech.state === "unsupported"
-                      ? "border-line text-muted/40 cursor-not-allowed"
-                      : "border-line text-muted hover:text-ink"
+                    : speech.state === "transcribing"
+                      ? "border-amber/50 text-amber animate-pulse cursor-wait"
+                      : speech.state === "unsupported"
+                        ? "border-line text-muted/40 cursor-not-allowed"
+                        : "border-line text-muted hover:text-ink"
                 }`}
                 title={
                   speech.state === "unsupported"
-                    ? "当前浏览器不支持语音输入,建议使用 Chrome"
-                    : speech.error || (speech.state === "listening" ? "正在听,点击停止" : "语音输入(中文)")
+                    ? "当前浏览器不支持录音(需要 MediaRecorder)"
+                    : speech.error ||
+                      (speech.state === "listening"
+                        ? "录音中,点击停止(最长 60 秒)"
+                        : speech.state === "transcribing"
+                          ? "转写中…"
+                          : "语音输入(中文,自托管识别)")
                 }
                 onClick={() => speech.state !== "unsupported" && speech.toggle()}
                 disabled={generating}

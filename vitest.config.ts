@@ -17,6 +17,7 @@ export default defineConfig({
       DATA_DIR: path.resolve(__dirname, ".test-data"),
       AGENT_MOCK: "1",
       NATIVE_BUILD_MOCK: "1",
+      SPEECH_MOCK: "1",
       CONNECTOR_MOCK: "1",
     },
     testTimeout: 60_000,

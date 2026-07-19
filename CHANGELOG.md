@@ -1,5 +1,20 @@
 # Changelog
 
+## v20 — 语音输入根因修复:自托管 Whisper 替换 Web Speech(2026-07-19)
+
+- **不可用根因**:v11 的 Web Speech API 依赖 Chrome 把音频送 Google 语音服务器识别,
+  国内网络不可达必然 `network` 报错(且 Safari/Firefox 支持参差)——前端无解,属架构问题
+- **修复 = 自托管 ASR**:浏览器 MediaRecorder 录音(webm/opus,Safari 回退 mp4;最长 60 秒
+  自动停,误触 <300ms 忽略)→ 平台 `/api/speech/transcribe`(登录 + 限流 10 次/分 +
+  5MB/格式白名单,音频只透传不落盘)→ 远程 **faster-whisper** 服务(small int8 CPU,
+  中文引导词 + VAD)。全浏览器统一可用,录音不出自有基础设施;实测 5 秒音频转写约 0.7 秒
+- 语音服务:`scripts/setup-speech-server.sh` 幂等装机(venv + FastAPI + systemd
+  `fusion-speech.service`,token 鉴权,模型经代理下载,`WHISPER_MODEL` 可换档);
+  平台 env `SPEECH_SERVICE_URL/TOKEN`,`SPEECH_MOCK=1` 测试桩
+- `useSpeech` 对外接口不变(state 增 `transcribing`,两处入口按钮加转写中脉冲);
+  权限拒绝/无麦克风/服务不可达分层报错
+- smoke 增 mock 转写与未登录 401 一步(路由依赖请求上下文,e2e 覆盖);README 语音段落如实改写
+
 ## v19 — 连接器扩容:GitHub · Figma · Notion · Slack · Google Drive(2026-07-19)
 
 - 五个"规划中"连接器全部真实现,连接器总数 3 → 8:GitHub(仓库/Issues/文件)、
