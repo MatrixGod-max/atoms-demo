@@ -114,7 +114,7 @@ export function useSpeech(onText: (text: string) => void) {
       const name = (err as Error)?.name;
       setError(
         name === "NotAllowedError" || name === "SecurityError"
-          ? "麦克风权限被拒绝,请在浏览器设置中允许"
+          ? "麦克风权限被拒绝:点击地址栏右侧 🔒 → 网站设置 → 允许麦克风,然后重试"
           : name === "NotFoundError"
             ? "没有检测到麦克风设备"
             : "无法启动录音,请重试"

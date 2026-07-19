@@ -465,6 +465,9 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
       )}
 
       {error && <p className="text-bad text-sm mt-2">{error}</p>}
+      {speech.error && <p className="text-bad text-sm mt-2">🎙 {speech.error}</p>}
+      {speech.state === "listening" && <p className="text-bad text-sm mt-2 animate-pulse">● 录音中…再点一次麦克风结束并转写</p>}
+      {speech.state === "transcribing" && <p className="text-amber text-sm mt-2">🎙 转写中…</p>}
 
       {!compact && (
         <div className="flex flex-wrap gap-2 mt-4 justify-center">

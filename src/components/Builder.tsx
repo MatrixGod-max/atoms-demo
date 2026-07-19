@@ -1497,6 +1497,11 @@ export default function Builder({ projectId }: { projectId: string }) {
           </div>
 
           <div className="p-3 border-t border-line shrink-0">
+            {speech.error && <p className="text-bad text-xs mb-2">🎙 {speech.error}</p>}
+            {speech.state === "listening" && (
+              <p className="text-bad text-xs mb-2 animate-pulse">● 录音中…再点一次 🎙 结束并转写</p>
+            )}
+            {speech.state === "transcribing" && <p className="text-amber text-xs mb-2">🎙 转写中…</p>}
             {pickTarget && (
               <div className="flex items-center gap-2 mb-2">
                 <span className="spec-chip px-2 py-1 text-[11px] flex items-center gap-1.5 font-mono" title={pickTarget.selector}>
