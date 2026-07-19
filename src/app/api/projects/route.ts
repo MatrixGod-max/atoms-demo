@@ -20,7 +20,8 @@ export async function POST(req: Request) {
   if (!user) return NextResponse.json({ error: "未登录" }, { status: 401 });
   const blocked = demoGuard(user);
   if (blocked) return NextResponse.json({ error: blocked }, { status: 403 });
-  const { prompt, remixSlug, templateId, platform, theme } = await req.json().catch(() => ({}));
+  const { prompt, remixSlug, templateId, platform, theme, connectors } = await req.json().catch(() => ({}));
+  const chosenConnectors = Array.isArray(connectors) && connectors.length ? JSON.stringify(connectors.slice(0, 5)) : null;
   const chosenTheme = typeof theme === "string" && theme.trim() ? theme.trim().slice(0, 20) : null;
   const chosenPlatform = platform === "mobile" ? "mobile" : "web";
 
@@ -83,7 +84,7 @@ export async function POST(req: Request) {
   const id = newId("p");
   const t = now();
   db.prepare(
-    "INSERT INTO projects (id, user_id, name, platform, theme, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-  ).run(id, user.id, prompt.trim().slice(0, 30), chosenPlatform, chosenTheme, t, t);
+    "INSERT INTO projects (id, user_id, name, platform, theme, connectors, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(id, user.id, prompt.trim().slice(0, 30), chosenPlatform, chosenTheme, chosenConnectors, t, t);
   return NextResponse.json({ id, prompt: prompt.trim() });
 }

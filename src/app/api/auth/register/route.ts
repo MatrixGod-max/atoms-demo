@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db, now } from "@/lib/db";
 import { createSession, hashPassword, newId } from "@/lib/auth";
 import { clientIp, rateLimit } from "@/lib/ratelimit";
+import { SIGNUP_BONUS, recordEvent } from "@/lib/credits";
 
 export async function POST(req: Request) {
   const rl = rateLimit(`auth:${clientIp(req)}`, 10, 60_000);
@@ -29,6 +30,7 @@ export async function POST(req: Request) {
     hashPassword(password),
     now()
   );
+  recordEvent(id, SIGNUP_BONUS, "signup");
   await createSession(id);
   return NextResponse.json({ ok: true });
 }

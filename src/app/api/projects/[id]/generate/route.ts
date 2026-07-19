@@ -5,6 +5,7 @@ import { ownedProject } from "@/lib/projects";
 import { jobRunner } from "@/lib/jobs";
 import { rateLimit } from "@/lib/ratelimit";
 import { normalizeMode } from "@/lib/models";
+import { balance, charge, generationCost } from "@/lib/credits";
 
 export const dynamic = "force-dynamic";
 
@@ -40,11 +41,20 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     return NextResponse.json({ error: `24 小时生成额度(${DAILY_QUOTA} 次)已用完,明天再来吧` }, { status: 429 });
   }
 
+  const cost = generationCost(normalizeMode(mode), research === true, team === true);
+  if (!charge(user.id, cost, `generate:${normalizeMode(mode)}`)) {
+    return NextResponse.json(
+      { error: `积分不足(本次需 ${cost},余额 ${balance(user.id)})。点击顶部横幅领取免费积分。` },
+      { status: 402 }
+    );
+  }
   try {
-    const { jobId, position } = jobRunner.start(id, user.id, prompt.trim(), research === true, normalizeMode(mode), team === true);
-    return NextResponse.json({ jobId, position });
+    const { jobId, position } = jobRunner.start(id, user.id, prompt.trim(), research === true, normalizeMode(mode), team === true, cost);
+    return NextResponse.json({ jobId, position, cost, credits: balance(user.id) });
   } catch (err) {
     const e = err as Error & { code?: number; jobId?: string };
+    // start() failed -> nothing will run; give the credits back.
+    charge(user.id, -cost, "refund:start-failed");
     if (e.code === 409) {
       return NextResponse.json({ error: e.message, jobId: e.jobId }, { status: 409 });
     }

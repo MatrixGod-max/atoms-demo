@@ -7,7 +7,12 @@ import { THEME_PRESETS, encodeFileBase64, inferMime, launchProject, precheckFile
 
 const EXAMPLES = ["一个番茄钟专注应用", "极简记账本,支持分类统计", "习惯打卡日历", "团队站会抽签转盘"];
 
-const CONNECTORS = ["GitHub", "Figma", "Google Drive", "Notion", "Slack"];
+const REAL_CONNECTORS = [
+  ["weather", "🌦 天气"],
+  ["rates", "💱 汇率"],
+  ["qr", "🔲 二维码"],
+] as const;
+const PLANNED_CONNECTORS = ["GitHub", "Figma", "Google Drive", "Notion", "Slack"];
 
 function fmtSize(bytes: number) {
   return bytes >= 1024 ? `${(bytes / 1024).toFixed(bytes >= 10240 ? 0 : 1)}KB` : `${bytes}B`;
@@ -40,6 +45,7 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
   const [platform, setPlatform] = useState<"web" | "mobile">("web");
   const [research, setResearch] = useState(false);
   const [theme, setTheme] = useState<string | null>(null);
+  const [connectors, setConnectors] = useState<string[]>([]);
   const [genMode, setGenMode] = useState<"fast" | "mixed" | "deep">("fast");
   const [modeOpen, setModeOpen] = useState(false);
   const speech = useSpeech((text) => setPrompt((v) => (v ? `${v}${text}` : text)));
@@ -81,12 +87,12 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
     setError("");
     closeMenus();
     if (!loggedIn) {
-      sessionStorage.setItem("quark_boot", JSON.stringify({ prompt: trimmed, platform, research, team: teamMode, theme, mode: genMode }));
+      sessionStorage.setItem("quark_boot", JSON.stringify({ prompt: trimmed, platform, research, team: teamMode, theme, mode: genMode, connectors }));
       router.push("/register?next=launch");
       return;
     }
     setBusy(true);
-    const result = await launchProject(trimmed, platform, { research, team: teamMode, theme, mode: genMode });
+    const result = await launchProject(trimmed, platform, { research, team: teamMode, theme, mode: genMode, connectors });
     if ("error" in result) {
       setError(result.error);
       setBusy(false);
@@ -170,12 +176,31 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
                     <span className={`text-muted transition-transform ${connectorsOpen ? "rotate-90" : ""}`}>›</span>
                   </button>
                   {connectorsOpen && (
-                    <div className="px-3 pb-2 flex flex-wrap gap-1.5">
-                      {CONNECTORS.map((c) => (
-                        <span key={c} className="px-2 py-1 text-[11px] rounded-md border border-line text-muted" title="即将推出">
-                          {c}
-                        </span>
-                      ))}
+                    <div className="px-3 pb-2">
+                      <div className="flex flex-wrap gap-1.5">
+                        {REAL_CONNECTORS.map(([id, label]) => (
+                          <button
+                            key={id}
+                            type="button"
+                            className={`px-2 py-1 text-[11px] rounded-md border transition-colors ${
+                              connectors.includes(id) ? "border-accent text-accent bg-accent-soft" : "border-line text-muted hover:text-ink"
+                            }`}
+                            onClick={() =>
+                              setConnectors((cs) => (cs.includes(id) ? cs.filter((x) => x !== id) : [...cs, id]))
+                            }
+                          >
+                            {label}
+                            {connectors.includes(id) ? " ✓" : ""}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 mt-1.5">
+                        {PLANNED_CONNECTORS.map((c) => (
+                          <span key={c} className="px-2 py-1 text-[11px] rounded-md border border-line text-muted/50" title="规划中">
+                            {c}
+                          </span>
+                        ))}
+                      </div>
                     </div>
                   )}
                   <div className="border-t border-line my-1" />

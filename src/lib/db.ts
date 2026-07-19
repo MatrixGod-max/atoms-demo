@@ -119,12 +119,28 @@ function createDb(): DatabaseSync {
       removed_at   INTEGER
     );
 
+    CREATE TABLE IF NOT EXISTS credit_events (
+      id         TEXT PRIMARY KEY,
+      user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      delta      INTEGER NOT NULL,
+      reason     TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS app_kv (
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
       k          TEXT NOT NULL,
       v          TEXT NOT NULL,
       updated_at INTEGER NOT NULL,
       PRIMARY KEY (project_id, k)
+    );
+
+    CREATE TABLE IF NOT EXISTS redeem_codes (
+      code       TEXT PRIMARY KEY,
+      amount     INTEGER NOT NULL,
+      used_by    TEXT REFERENCES users(id),
+      used_at    INTEGER,
+      created_at INTEGER NOT NULL
     );
 
     CREATE INDEX IF NOT EXISTS idx_jobs_project ON jobs(project_id, status);
@@ -139,6 +155,12 @@ function createDb(): DatabaseSync {
   ensureColumn(db, "jobs", "mode", "mode TEXT NOT NULL DEFAULT 'fast'");
   ensureColumn(db, "jobs", "team", "team INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "projects", "theme", "theme TEXT");
+  ensureColumn(db, "projects", "connectors", "connectors TEXT");
+  ensureColumn(db, "projects", "domain_name", "domain_name TEXT");
+  ensureColumn(db, "users", "credits", "credits INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "users", "plan", "plan TEXT NOT NULL DEFAULT 'free'");
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_domain ON projects(domain_name) WHERE domain_name IS NOT NULL");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_credit_events_user ON credit_events(user_id, created_at)");
   backfillArtifacts(db);
   return db;
 }

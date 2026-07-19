@@ -160,6 +160,57 @@ curl -fsS -b "$JAR" "$BASE_URL/api/projects/$TPROJ" | grep -q '"platform":"mobil
 CORS=$(curl -fsS -X OPTIONS -o /dev/null -w '%{http_code}' "$BASE_URL/api/apps/$SLUG/kv/x" -H 'Origin: http://elsewhere.example' -H 'Access-Control-Request-Method: PUT')
 [ "$CORS" = "204" ] || fail "kv CORS preflight, got $CORS"
 
+step "credits: signup bonus, claim idempotent, charge, refund on failure"
+CRED=$(curl -fsS -b "$JAR" "$BASE_URL/api/credits")
+echo "$CRED" | grep -q '"credits":' || fail "credits endpoint"
+B0=$(echo "$CRED" | sed -E 's/.*"credits":([0-9-]+).*/\1/')
+[ "$B0" -ge 15 ] || fail "signup bonus missing (balance $B0)"
+curl -fsS -b "$JAR" -X POST "$BASE_URL/api/credits/claim" | grep -q '"claimed":true' || fail "claim"
+curl -fsS -b "$JAR" -X POST "$BASE_URL/api/credits/claim" | grep -q '"claimed":false' || fail "claim not idempotent"
+B1=$(curl -fsS -b "$JAR" "$BASE_URL/api/credits" | sed -E 's/.*"credits":([0-9-]+).*/\1/')
+[ "$B1" = "$((B0 + 26))" ] || fail "claim amount wrong ($B0 -> $B1)"
+CPROJ=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects" \
+  -H 'content-type: application/json' -d '{"prompt":"smoke 扣费"}' | sed -E 's/.*"id":"([^"]+)".*/\1/')
+CJOB=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects/$CPROJ/generate" \
+  -H 'content-type: application/json' -d '{"prompt":"smoke 扣费"}' | sed -E 's/.*"jobId":"([^"]+)".*/\1/')
+CS=$(timeout 120 curl -fsS -N -b "$JAR" "$BASE_URL/api/jobs/$CJOB/stream")
+echo "$CS" | grep -q '"type":"version"' || fail "charge gen"
+B2=$(curl -fsS -b "$JAR" "$BASE_URL/api/credits" | sed -E 's/.*"credits":([0-9-]+).*/\1/')
+[ "$B2" = "$((B1 - 1))" ] || fail "fast charge should be 1 ($B1 -> $B2)"
+
+step "connectors: stored on create, marker in output, proxy whitelist (fourth account)"
+curl -fsS -c "$JAR" -X POST "$BASE_URL/api/auth/register" \
+  -H 'content-type: application/json' \
+  -d "{\"email\":\"c-$EMAIL\",\"password\":\"Smoke2026ci\"}" | grep -q '"ok":true' || fail "register fourth account"
+NPROJ=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects" \
+  -H 'content-type: application/json' -d '{"prompt":"smoke 连接器","connectors":["weather","qr"]}' | sed -E 's/.*"id":"([^"]+)".*/\1/')
+NJOB=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects/$NPROJ/generate" \
+  -H 'content-type: application/json' -d '{"prompt":"smoke 连接器"}' | sed -E 's/.*"jobId":"([^"]+)".*/\1/')
+NS=$(timeout 120 curl -fsS -N -b "$JAR" "$BASE_URL/api/jobs/$NJOB/stream")
+echo "$NS" | grep -q '"type":"version"' || fail "connector gen"
+curl -fsS -b "$JAR" "$BASE_URL/api/projects/$NPROJ" | grep -q 'connectors: weather,qr' || fail "connector marker missing"
+curl -fsS "$BASE_URL/api/connectors/qr?text=smoke" | grep -q '"svg"' || fail "qr connector"
+QCODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/connectors/hack")
+[ "$QCODE" = "400" ] || fail "unknown connector should 400, got $QCODE"
+
+step "domains: bind, check endpoint, /d serving, release"
+DNAME="smoke$(date +%s | tail -c 6)$RANDOM"
+DNAME=$(echo "$DNAME" | cut -c1-20)
+curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects/$NPROJ/publish" \
+  -H 'content-type: application/json' -d '{"action":"publish"}' | grep -q '"ok":true' || fail "publish for domain"
+curl -fsS -b "$JAR" -X PATCH "$BASE_URL/api/projects/$NPROJ" \
+  -H 'content-type: application/json' -d "{\"domainName\":\"$DNAME\"}" | grep -q '"ok":true' || fail "bind domain"
+DCODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/domains/check?domain=$DNAME.quark-apps.lexarcai.com")
+[ "$DCODE" = "200" ] || fail "domain check should 200, got $DCODE"
+curl -fsS "$BASE_URL/d/$DNAME" | grep -q "<!DOCTYPE html>" || fail "/d serving"
+RCODE=$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -X PATCH "$BASE_URL/api/projects/$NPROJ" \
+  -H 'content-type: application/json' -d '{"domainName":"www"}')
+[ "$RCODE" = "400" ] || fail "reserved domain should 400, got $RCODE"
+curl -fsS -b "$JAR" -X PATCH "$BASE_URL/api/projects/$NPROJ" \
+  -H 'content-type: application/json' -d '{"domainName":null}' | grep -q '"ok":true' || fail "release domain"
+DCODE2=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/domains/check?domain=$DNAME.quark-apps.lexarcai.com")
+[ "$DCODE2" = "404" ] || fail "released domain check should 404, got $DCODE2"
+
 step "unauthenticated dashboard access is redirected"
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/dashboard")
 [ "$CODE" = "307" ] || [ "$CODE" = "302" ] || fail "dashboard should redirect, got $CODE"

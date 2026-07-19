@@ -15,7 +15,10 @@ export default async function ShellLayout({ children }: { children: React.ReactN
     <div className="min-h-dvh flex flex-col">
       <PromoBanner />
       <div className="flex-1 flex flex-col sm:flex-row">
-        <Sidebar user={user ? { name: user.name } : null} projectCount={projectCount} />
+        <Sidebar
+          user={user ? { id: user.id, name: user.name, email: user.email, plan: user.plan, isDemo: user.isDemo } : null}
+          projectCount={projectCount}
+        />
         <main className="flex-1 min-w-0 flex flex-col">{children}</main>
       </div>
     </div>

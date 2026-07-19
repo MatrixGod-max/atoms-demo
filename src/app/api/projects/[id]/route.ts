@@ -6,6 +6,8 @@ import { jobRunner } from "@/lib/jobs";
 import { now } from "@/lib/db";
 import { listAttachments } from "@/lib/attachments";
 import { listDeployments, DEPLOY_TARGETS } from "@/lib/deploy";
+import { validateDomainName } from "@/lib/domains";
+import { CONNECTORS } from "@/lib/connectors";
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const user = await getUser();
@@ -47,7 +49,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   const { id } = await ctx.params;
   if (!ownedProject(user.id, id)) return NextResponse.json({ error: "项目不存在" }, { status: 404 });
 
-  const { name, inGallery, platform, theme } = await req.json().catch(() => ({}));
+  const { name, inGallery, platform, theme, connectors, domainName } = await req.json().catch(() => ({}));
   if (typeof name === "string" && name.trim()) {
     db.prepare("UPDATE projects SET name = ?, updated_at = ? WHERE id = ?").run(name.trim().slice(0, 40), now(), id);
   }
@@ -60,6 +62,24 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   }
   if (platform === "web" || platform === "mobile") {
     db.prepare("UPDATE projects SET platform = ?, updated_at = ? WHERE id = ?").run(platform, now(), id);
+  }
+  if (Array.isArray(connectors)) {
+    const valid = connectors.filter((c) => CONNECTORS.some((k) => k.id === c)).slice(0, 5);
+    db.prepare("UPDATE projects SET connectors = ?, updated_at = ? WHERE id = ?").run(
+      valid.length ? JSON.stringify(valid) : null,
+      now(),
+      id
+    );
+  }
+  if (domainName === null) {
+    db.prepare("UPDATE projects SET domain_name = NULL, updated_at = ? WHERE id = ?").run(now(), id);
+  } else if (typeof domainName === "string") {
+    const dn = domainName.trim().toLowerCase();
+    const invalid = validateDomainName(dn);
+    if (invalid) return NextResponse.json({ error: invalid }, { status: 400 });
+    const taken = db.prepare("SELECT 1 FROM projects WHERE domain_name = ? AND id != ?").get(dn, id);
+    if (taken) return NextResponse.json({ error: "该域名已被占用,请换一个" }, { status: 409 });
+    db.prepare("UPDATE projects SET domain_name = ?, updated_at = ? WHERE id = ?").run(dn, now(), id);
   }
   if (typeof inGallery === "boolean") {
     db.prepare("UPDATE projects SET in_gallery = ? WHERE id = ?").run(inGallery ? 1 : 0, id);

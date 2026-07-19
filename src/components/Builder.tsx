@@ -30,6 +30,8 @@ interface ProjectDetail {
     in_gallery: number;
     platform: "web" | "mobile";
     theme: string | null;
+    connectors: string | null;
+    domain_name: string | null;
   };
   messages: Message[];
   versions: Version[];
@@ -122,6 +124,9 @@ export default function Builder({ projectId }: { projectId: string }) {
   const [research, setResearch] = useState(false);
   const [team, setTeam] = useState(false);
   const [targetOpen, setTargetOpen] = useState(false);
+  const [connOpen, setConnOpen] = useState(false);
+  const [domainDraft, setDomainDraft] = useState("");
+  const [domainBusy, setDomainBusy] = useState(false);
   const speech = useSpeech((text) => setInput((v) => (v ? `${v}${text}` : text)));
   const [genMode, setGenMode] = useState<"fast" | "mixed" | "deep">("fast");
   const [previewReady, setPreviewReady] = useState(false);
@@ -294,6 +299,7 @@ export default function Builder({ projectId }: { projectId: string }) {
         setGenerating(false);
         setReconnecting(false);
         setQueuePos(0);
+        window.dispatchEvent(new Event("credits-changed"));
       }
     },
     [projectId, streamOnce, load, resetRunState, pushError]
@@ -417,7 +423,7 @@ export default function Builder({ projectId }: { projectId: string }) {
     setPublishBusy(false);
   }
 
-  async function patchProject(body: { name?: string; inGallery?: boolean; platform?: "web" | "mobile"; theme?: string | null }) {
+  async function patchProject(body: { name?: string; inGallery?: boolean; platform?: "web" | "mobile"; theme?: string | null; connectors?: string[]; domainName?: string | null }) {
     const res = await fetch(`/api/projects/${projectId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -649,6 +655,53 @@ export default function Builder({ projectId }: { projectId: string }) {
               </button>
               {deployOpen && (
                 <div className="absolute right-0 top-full mt-1 card p-3 z-20 w-80 max-w-[90vw] flex flex-col gap-2.5 text-xs">
+                  {project?.slug && (
+                    <div className="border border-line rounded-lg p-2.5">
+                      <b>专属域名</b>
+                      {project.domain_name ? (
+                        <div className="flex items-center gap-2 mt-1.5">
+                          <a
+                            href={`https://${project.domain_name}.quark-apps.lexarcai.com`}
+                            target="_blank"
+                            rel="noopener"
+                            className="text-accent truncate hover:underline"
+                          >
+                            {project.domain_name}.quark-apps.lexarcai.com
+                          </a>
+                          <button
+                            className="text-muted hover:text-bad ml-auto shrink-0"
+                            onClick={() => patchProject({ domainName: null })}
+                          >
+                            释放
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5 mt-1.5">
+                          <input
+                            className="input px-2 py-1.5 flex-1 min-w-0"
+                            placeholder="myapp"
+                            value={domainDraft}
+                            maxLength={30}
+                            onChange={(e) => setDomainDraft(e.target.value.toLowerCase())}
+                          />
+                          <span className="text-muted shrink-0">.quark-apps…</span>
+                          <button
+                            className="btn-primary px-2.5 py-1 shrink-0"
+                            disabled={domainBusy || !domainDraft.trim()}
+                            onClick={async () => {
+                              setDomainBusy(true);
+                              await patchProject({ domainName: domainDraft.trim() });
+                              setDomainBusy(false);
+                              setDomainDraft("");
+                            }}
+                          >
+                            绑定
+                          </button>
+                        </div>
+                      )}
+                      <p className="text-muted mt-1">首次访问自动签发 HTTPS 证书,约需数秒</p>
+                    </div>
+                  )}
                   {(detail?.deployTargets ?? []).map((t) => (
                     <div key={t.id} className="border border-line rounded-lg p-2.5">
                       <div className="flex items-center gap-2">
@@ -914,6 +967,42 @@ export default function Builder({ projectId }: { projectId: string }) {
               >
                 👥 团队模式{team ? " ✓" : ""}
               </button>
+              <div className="relative">
+                <button
+                  className="px-2.5 py-1 text-xs rounded-lg border border-line text-muted hover:text-ink transition-colors"
+                  onClick={() => setConnOpen(!connOpen)}
+                  disabled={generating}
+                  title="连接器:允许应用调用平台代理的真实数据 API"
+                >
+                  🔌 连接器{(() => { try { const c = JSON.parse(project?.connectors ?? "[]"); return c.length ? ` ${c.length}` : ""; } catch { return ""; } })()}
+                </button>
+                {connOpen && (
+                  <div className="absolute bottom-full mb-1 left-0 card p-2 z-20 flex flex-col gap-1 min-w-40">
+                    {(
+                      [
+                        ["weather", "🌦 天气"],
+                        ["rates", "💱 汇率"],
+                        ["qr", "🔲 二维码"],
+                      ] as const
+                    ).map(([id, label]) => {
+                      let enabled: string[] = [];
+                      try { enabled = JSON.parse(project?.connectors ?? "[]"); } catch { enabled = []; }
+                      const on = enabled.includes(id);
+                      return (
+                        <button
+                          key={id}
+                          className={`text-left px-2.5 py-1.5 text-xs rounded-md flex items-center gap-2 ${on ? "text-accent bg-accent-soft" : "text-muted hover:text-ink hover:bg-bg-deep"}`}
+                          onClick={() => patchProject({ connectors: on ? enabled.filter((x) => x !== id) : [...enabled, id] })}
+                        >
+                          <span className="flex-1">{label}</span>
+                          {on && <span>✓</span>}
+                        </button>
+                      );
+                    })}
+                    <p className="text-[10px] text-muted px-1 pt-1 border-t border-line">改动在下次生成时生效</p>
+                  </div>
+                )}
+              </div>
               <div className="flex items-center rounded-lg border border-line overflow-hidden text-[11px]">
                 {GEN_MODES.map(([m, label, desc]) => (
                   <button

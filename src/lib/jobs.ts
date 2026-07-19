@@ -3,6 +3,8 @@ import { newId } from "./auth";
 import { runPipeline, type AgentEvent, type AppSpec } from "./agent";
 import { inlineImageAssets, loadPipelineAttachments } from "./attachments";
 import type { GenerationMode } from "./models";
+import { recordEvent } from "./credits";
+import { parseConnectors } from "./connectors";
 
 const MAX_CONCURRENT = 2;
 const BUFFER_CAP = 9000;
@@ -32,6 +34,7 @@ interface LiveJob {
   research: boolean;
   team: boolean;
   mode: GenerationMode;
+  cost: number;
   history: { role: "user" | "agent"; content: string }[];
   buffer: string[];
   droppedDeltas: boolean;
@@ -71,7 +74,8 @@ class JobRunner {
     prompt: string,
     research = false,
     mode: GenerationMode = "fast",
-    team = false
+    team = false,
+    cost = 0
   ): { jobId: string; position: number } {
     const existing = this.activeJobForProject(projectId);
     if (existing) {
@@ -106,6 +110,7 @@ class JobRunner {
       research,
       team,
       mode,
+      cost,
       history,
       buffer: [],
       droppedDeltas: false,
@@ -174,8 +179,8 @@ class JobRunner {
     this.setStatus(job.id, "running");
     this.emit(job, { type: "job_state", status: "running" });
     try {
-      const project = db.prepare("SELECT current_version_id, platform, theme FROM projects WHERE id = ?").get(job.projectId) as
-        | { current_version_id: string | null; platform: "web" | "mobile"; theme: string | null }
+      const project = db.prepare("SELECT current_version_id, platform, theme, connectors FROM projects WHERE id = ?").get(job.projectId) as
+        | { current_version_id: string | null; platform: "web" | "mobile"; theme: string | null; connectors: string | null }
         | undefined;
       if (!project) throw new Error("项目已被删除");
       const currentVersion = project.current_version_id
@@ -195,6 +200,7 @@ class JobRunner {
         research: job.research,
         team: job.team,
         theme: project.theme,
+        connectors: parseConnectors(project.connectors),
         attachments,
         mode: job.mode,
       })) {
@@ -254,6 +260,7 @@ class JobRunner {
         "INSERT INTO messages (id, project_id, role, content, meta, created_at) VALUES (?, ?, 'agent', ?, 'error', ?)"
       ).run(newId("m"), job.projectId, `生成失败:${message}`, now());
       this.setStatus(job.id, "error", { error: message });
+      if (job.cost > 0) recordEvent(job.userId, job.cost, "refund:failed-job");
       this.emit(job, { type: "error", message });
       this.emit(job, { type: "job_state", status: "error", error: message });
     } finally {

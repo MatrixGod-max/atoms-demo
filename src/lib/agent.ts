@@ -12,6 +12,7 @@ import { validateHtml } from "./validate";
 import { fetchReferences } from "./research";
 import { modelBadge, normalizeMode, stageModels, type GenerationMode } from "./models";
 import type { PipelineAttachment } from "./attachments";
+import { CONNECTORS } from "./connectors";
 
 export interface ResearchBrief {
   audience: string;
@@ -152,6 +153,7 @@ export interface PipelineInput {
   research?: boolean;
   team?: boolean;
   theme?: string | null;
+  connectors?: string[];
   attachments?: PipelineAttachment[];
   mode?: GenerationMode;
 }
@@ -228,11 +230,12 @@ async function* runMockPipeline(input: PipelineInput): AsyncGenerator<AgentEvent
       ? `<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#0d0e1c"><meta name="apple-mobile-web-app-capable" content="yes">`
       : `<meta name="viewport" content="width=device-width, initial-scale=1">`;
   const themeComment = input.theme ? `<!-- theme: ${input.theme} -->` : "";
+  const connComment = input.connectors?.length ? `<!-- connectors: ${input.connectors.join(",")} -->` : "";
   const attComment = input.attachments?.length
     ? `<!-- attachments: ${input.attachments.map((a) => a.filename).join(", ")} -->`
     : "";
   let html = `<!DOCTYPE html>
-<html lang="zh-CN"><head><meta charset="utf-8">${mobileMeta}${attComment}${themeComment}<title>Mock 计数器</title>
+<html lang="zh-CN"><head><meta charset="utf-8">${mobileMeta}${attComment}${themeComment}${connComment}<title>Mock 计数器</title>
 <style>body{font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:16px}button{font-size:20px;padding:8px 24px}</style>
 </head><body><h1 id="n">0</h1><button id="b">+1</button>
 ${broken ? "<script>throw new Error('mock runtime failure')<\/script>" : ""}
@@ -409,6 +412,12 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
       content: `你是 Quark 平台的工程师智能体(Engineer),负责把产品需求实现为单文件${isMobile ? "移动" : "网页"}应用。\n${ENGINEER_RULES}${isMobile ? ENGINEER_RULES_MOBILE_EXTRA : ""}${
         input.theme
           ? `\n【主题规范】本项目的视觉主题固定为「${input.theme}」:配色、字体气质、圆角、阴影与背景必须符合该主题,且在后续所有修改中保持一致。`
+          : ""
+      }${
+        input.connectors?.length
+          ? `\n【连接器】本项目启用了以下平台连接器(发布后可用,预览沙箱可能不可用,必须做加载态与失败降级,失败时展示占位数据):\n${CONNECTORS.filter((c) => input.connectors!.includes(c.id))
+              .map((c) => `- ${c.name}: ${c.doc}`)
+              .join("\n")}\n调用统一通过 window.quark.connectors(存在性判断后使用),不得直接 fetch 外部网络。`
           : ""
       }`,
     },

@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
-import LogoutButton from "./LogoutButton";
+import { useEffect, useState } from "react";
+import UserMenu, { type MenuUser } from "./UserMenu";
 
 const NAV = [
   ["/", "⌂", "首页"],
@@ -15,12 +15,33 @@ export default function Sidebar({
   user,
   projectCount,
 }: {
-  user: { name: string } | null;
+  user: MenuUser | null;
   projectCount: number;
 }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [credits, setCredits] = useState<number | null>(null);
+  const [events, setEvents] = useState<{ delta: number; reason: string; created_at: number }[]>([]);
+  const [ledgerOpen, setLedgerOpen] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    const loadCredits = async () => {
+      const res = await fetch("/api/credits");
+      if (res.ok) {
+        const d = await res.json();
+        setCredits(d.credits);
+        setEvents(d.events ?? []);
+      }
+    };
+    loadCredits();
+    window.addEventListener("credits-changed", loadCredits);
+    return () => window.removeEventListener("credits-changed", loadCredits);
+  }, [user]);
+
+  const reasonLabel = (r: string) =>
+    r === "signup" ? "注册赠送" : r === "banner" ? "横幅领取" : r.startsWith("refund") ? "失败返还" : r.startsWith("generate") ? `生成消耗(${r.split(":")[1] ?? ""})` : r.startsWith("plan:") ? "套餐升级奖励" : r.startsWith("redeem") ? "兑换码" : r;
 
   const nav = (
     <nav className="flex flex-col gap-0.5 px-2">
@@ -100,27 +121,47 @@ export default function Sidebar({
             </span>
             <span className="text-muted text-xs">›</span>
           </button>
-          <button type="button" className="card rounded-xl px-3.5 py-3 text-left flex items-center gap-3 hover:bg-bg-deep transition-colors" title="即将推出">
-            <span className="text-base">🎁</span>
-            <span className="flex-1">
-              <span className="block text-sm font-medium">获取免费积分</span>
-              <span className="block text-xs text-muted mt-0.5">每人获得 10 积分</span>
-            </span>
-            <span className="text-muted text-xs">›</span>
-          </button>
-          <div className="flex items-center justify-between px-1 pt-1 text-xs text-muted">
-            {user ? (
-              <>
-                <span className="truncate">{user.name}</span>
-                <LogoutButton />
-              </>
-            ) : (
-              <div className="flex gap-3">
-                <Link href="/login" className="hover:text-ink">登录</Link>
-                <Link href="/register" className="hover:text-ink">注册</Link>
-              </div>
-            )}
-          </div>
+          {user && credits !== null && (
+            <div className="card rounded-xl px-3.5 py-3">
+              <button type="button" className="w-full text-left flex items-center gap-3" onClick={() => setLedgerOpen(!ledgerOpen)}>
+                <span className="text-base">🪙</span>
+                <span className="flex-1">
+                  <span className="block text-sm font-medium">积分余额</span>
+                  <span className="block text-xs text-muted mt-0.5">生成按模式消耗,失败自动返还</span>
+                </span>
+                <span className="text-sm font-semibold">{credits}</span>
+              </button>
+              {ledgerOpen && (
+                <div className="mt-2 pt-2 border-t border-line max-h-40 overflow-y-auto flex flex-col gap-1">
+                  {events.length === 0 && <span className="text-xs text-muted">暂无明细</span>}
+                  {events.map((e, i) => (
+                    <div key={i} className="flex justify-between text-xs">
+                      <span className="text-muted">{reasonLabel(e.reason)}</span>
+                      <span className={e.delta > 0 ? "text-good" : "text-muted"}>{e.delta > 0 ? `+${e.delta}` : e.delta}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {!user && (
+            <button type="button" className="card rounded-xl px-3.5 py-3 text-left flex items-center gap-3 hover:bg-bg-deep transition-colors" title="注册即送 20 积分">
+              <span className="text-base">🎁</span>
+              <span className="flex-1">
+                <span className="block text-sm font-medium">获取免费积分</span>
+                <span className="block text-xs text-muted mt-0.5">注册即送 20 积分</span>
+              </span>
+              <span className="text-muted text-xs">›</span>
+            </button>
+          )}
+          {user ? (
+            <UserMenu user={user} />
+          ) : (
+            <div className="flex items-center gap-3 px-1 pt-1 text-xs text-muted">
+              <Link href="/login" className="hover:text-ink">登录</Link>
+              <Link href="/register" className="hover:text-ink">注册</Link>
+            </div>
+          )}
         </div>
       )}
     </>

@@ -8,9 +8,19 @@ export function proxy(req: NextRequest) {
   const host = (req.headers.get("host") || "").toLowerCase();
   const { pathname } = req.nextUrl;
 
+  // Project custom subdomains: {name}.APPS_HOST -> /d/{name}
+  if (host !== APPS_HOST && host.endsWith(`.${APPS_HOST}`)) {
+    const sub = host.slice(0, -(APPS_HOST.length + 1));
+    if (pathname.startsWith("/api/apps/") || pathname.startsWith("/api/connectors/")) return NextResponse.next();
+    if (/^[a-z0-9-]+$/.test(sub) && pathname === "/") {
+      return NextResponse.rewrite(new URL(`/d/${sub}`, req.url));
+    }
+    return NextResponse.redirect(PLATFORM_ORIGIN, 302);
+  }
+
   // Published-apps origin: isolated from the platform. Serves only apps, artifact snapshots, and their KV API.
   if (host === APPS_HOST) {
-    if (pathname.startsWith("/api/apps/")) return NextResponse.next();
+    if (pathname.startsWith("/api/apps/") || pathname.startsWith("/api/connectors/")) return NextResponse.next();
     const short = pathname.match(/^\/([a-z0-9]{4,16})(\/v\/[0-9]{1,4}|\/sw\.js)?$/);
     if (short) return NextResponse.rewrite(new URL(`/p/${short[1]}${short[2] ?? ""}`, req.url));
     if (/^\/p\/[a-z0-9]+(\/v\/[0-9]{1,4}|\/sw\.js)?$/.test(pathname)) return NextResponse.next();

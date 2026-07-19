@@ -26,7 +26,16 @@ export default function RootLayout({
     <html
       lang="zh-CN"
       className={`${spaceGrotesk.variable} ${jetbrains.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
+      <head>
+        {/* Apply the persisted shell theme before first paint to avoid a light-mode flash. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem("fusion-theme");if(t==="dark"||((t===null||t==="system")&&matchMedia("(prefers-color-scheme: dark)").matches))document.documentElement.dataset.theme="dark"}catch(e){}})()`,
+          }}
+        />
+      </head>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );

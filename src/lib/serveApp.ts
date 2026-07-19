@@ -1,4 +1,5 @@
 /** Shared serving pipeline for published apps: helper/badge injection + response. */
+import { connectorsHelper, parseConnectors } from "./connectors";
 
 /**
  * ~600B runtime injected into every published app: window.quark.storage —
@@ -38,10 +39,12 @@ function pwaHelper(slug: string, html: string, snapshot: boolean): string {
 export interface ServeOptions {
   platform?: "web" | "mobile";
   snapshot?: boolean;
+  /** raw JSON column value; parsed defensively */
+  connectors?: string | null;
 }
 
 function buildAppHtml(html: string, slug: string, opts: ServeOptions, apiBase = ""): string {
-  let helper = storageHelper(slug, apiBase) + remixBadge(slug);
+  let helper = storageHelper(slug, apiBase) + remixBadge(slug) + connectorsHelper(parseConnectors(opts.connectors), apiBase);
   // PWA surfaces (manifest/SW) are same-origin routes; skip them off-origin.
   if (opts.platform === "mobile" && !apiBase) helper += pwaHelper(slug, html, !!opts.snapshot);
   return /<head[^>]*>/i.test(html) ? html.replace(/<head([^>]*)>/i, `<head$1>${helper}`) : helper + html;
