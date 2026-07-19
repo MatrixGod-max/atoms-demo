@@ -1737,7 +1737,7 @@ export default function Builder({ projectId }: { projectId: string }) {
                           ? "转写中…"
                           : "语音输入(中文,自托管识别)")
                 }
-                onClick={() => speech.state !== "unsupported" && speech.toggle()}
+                onClick={() => speech.toggle()}
                 disabled={generating}
                 aria-label="语音输入"
               >

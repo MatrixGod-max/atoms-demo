@@ -373,7 +373,7 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
                       ? "text-muted/40 cursor-not-allowed"
                       : "text-muted hover:text-ink hover:bg-bg-deep"
               }`}
-              onClick={() => speech.state !== "unsupported" && speech.toggle()}
+              onClick={() => speech.toggle()}
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
                 <rect x="1" y="6" width="2" height="4" rx="1" />

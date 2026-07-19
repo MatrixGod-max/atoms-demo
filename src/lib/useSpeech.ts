@@ -33,8 +33,13 @@ export function useSpeech(onText: (text: string) => void) {
     onTextRef.current = onText;
   }, [onText]);
 
+  const unsupportedReasonRef = useRef("");
   useEffect(() => {
     if (typeof MediaRecorder === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      // 非 HTTPS(且非 localhost)时浏览器直接不暴露 mediaDevices —— 连授权弹窗都不会出现
+      unsupportedReasonRef.current = !window.isSecureContext
+        ? `语音需要 HTTPS 安全环境:当前页面是 ${location.protocol}//,请改用 https:// 域名访问`
+        : "当前浏览器不支持录音(缺少 MediaRecorder),请使用最新版 Chrome/Edge/Safari";
       const t = setTimeout(() => setState("unsupported"), 0);
       return () => clearTimeout(t);
     }
@@ -87,6 +92,11 @@ export function useSpeech(onText: (text: string) => void) {
 
   const toggle = useCallback(async () => {
     setError("");
+    if (state === "unsupported") {
+      // 点击也要给出可见解释,而不是静默无响应
+      setError(unsupportedReasonRef.current || "当前环境不支持录音");
+      return;
+    }
     if (state === "transcribing") return;
     if (state === "listening") {
       const rec = recorderRef.current;
@@ -114,7 +124,7 @@ export function useSpeech(onText: (text: string) => void) {
       const name = (err as Error)?.name;
       setError(
         name === "NotAllowedError" || name === "SecurityError"
-          ? "麦克风权限被拒绝:点击地址栏右侧 🔒 → 网站设置 → 允许麦克风,然后重试"
+          ? "麦克风权限被拒绝:点击地址栏左侧图标(🔒 或「调节」滑块图标)→ 网站设置 → 麦克风改为「允许」后重试"
           : name === "NotFoundError"
             ? "没有检测到麦克风设备"
             : "无法启动录音,请重试"
