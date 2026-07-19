@@ -54,3 +54,4 @@ data-dev/
 docs/*.tmp.png
 
 .next-dev/
+.next-ci/
