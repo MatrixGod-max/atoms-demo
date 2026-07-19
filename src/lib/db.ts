@@ -77,11 +77,22 @@ function createDb(): DatabaseSync {
     );
 
     CREATE INDEX IF NOT EXISTS idx_jobs_project ON jobs(project_id, status);
+    CREATE INDEX IF NOT EXISTS idx_projects_gallery ON projects(published_version_id, updated_at);
     CREATE INDEX IF NOT EXISTS idx_messages_project ON messages(project_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_versions_project ON app_versions(project_id, num);
     CREATE INDEX IF NOT EXISTS idx_projects_user ON projects(user_id, updated_at);
   `);
+  ensureColumn(db, "projects", "in_gallery", "in_gallery INTEGER NOT NULL DEFAULT 1");
+  ensureColumn(db, "users", "is_demo", "is_demo INTEGER NOT NULL DEFAULT 0");
   return db;
+}
+
+/** Additive migration: CREATE TABLE IF NOT EXISTS won't extend existing tables. */
+function ensureColumn(db: DatabaseSync, table: string, column: string, ddl: string) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+  }
 }
 
 // Survive Next.js dev HMR: keep a single connection on globalThis.

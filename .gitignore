@@ -49,3 +49,6 @@ data/
 
 # tests
 .test-data/
+
+data-dev/
+docs/*.tmp.png

@@ -1,15 +1,35 @@
 # ⚛ Quark — 智能体驱动的应用生成平台
 
 > ROOT / AI Native 全栈工程师笔试作品。万物由原子构成,原子由夸克构成 —— Quark 是 Atoms 的"基本粒子版":
-> 用一句话描述想法,由 Planner / Engineer / Reviewer 三个智能体协作,生成一个可运行、可迭代、可发布的网页应用。
+> 用一句话描述想法,由 Planner / Engineer / Reviewer / Validator 四个智能体协作,生成一个可运行、可迭代、可发布、可被 Remix 的网页应用。
 
-**在线体验:<https://quark.lexarcai.com>**(注册任意邮箱即可,无需验证)
+**在线体验:<https://quark.lexarcai.com>**
+
+| ![landing](docs/landing.png) | ![builder](docs/builder.png) |
+|---|---|
+| ![explore](docs/explore.png) | ![mobile](docs/builder-mobile.png) |
+
+## 评审快速验收(3 分钟)
+
+1. **免登录**:打开 [展厅 /explore](https://quark.lexarcai.com/explore) —— 每个应用都是智能体生成并发布的,可直接打开体验(注意右下角 Remix 徽章)
+2. **看工作台**(免注册):演示账号 `demo@quark.dev / quark123`(只读),登录后可浏览示例项目的对话历史、智能体时间线产物、版本列表与预览
+3. **完整体验**:注册任意邮箱(无需验证)→ 首页输入一句话 → 观看 Planner→Engineer→Reviewer→Validator 流水线实况(约 1-2 分钟)→ 迭代 → 发布,或从展厅 Remix 一个现成应用改造
+4. **本地验证**:`npm test`(11 例)+ `AGENT_MOCK=1` 模式下 `bash scripts/smoke.sh` 零成本跑通全链路(见下文)
 
 ## 核心流程
 
-```
-注册/登录 → 描述想法 → Planner 产出产品规格 → Engineer 流式生成代码
-        → Reviewer 评审(必要时修复) → 沙箱实时预览 → 对话式迭代 → 一键发布公开链接
+```mermaid
+flowchart LR
+    A[描述想法] --> B[Planner<br/>产品规格]
+    B --> C[Engineer<br/>流式生成代码]
+    C --> D[Reviewer<br/>静态评审]
+    D --> E[Validator<br/>headless Chrome 实测]
+    E -->|运行时错误| C
+    E --> F[沙箱实时预览]
+    F -->|对话式迭代| C
+    F --> G[发布到独立源<br/>quark-apps + 云存储]
+    G --> H[展厅曝光]
+    H -->|Remix| A
 ```
 
 - **真实交互**:生成的应用在沙箱 iframe 中即刻可用;平台本身的注册、项目管理、生成、发布全部真实落库。
@@ -47,6 +67,13 @@ v2(生产化改造,对应下方原扩展优先级 1-3 全部落地):
 - [x] **应用云存储**(对标 Atoms Cloud):发布应用注入 `window.quark.storage`(服务端 KV,全部访客共享,8KB/值、64 键/应用),换设备数据仍在;不可用时自动降级 localStorage
 - [x] **安全**:发布应用迁移到独立源 `quark-apps.lexarcai.com`(与平台 cookie/origin 隔离);预览 iframe 去除 `allow-same-origin`;登录/注册限流 10 次/分/IP;生成限流 3 次/10 分 + 24h 配额 30 次/用户;变更类 API Origin 校验
 - [x] **可运维**:`/api/health`、SQLite 每日备份(保留 14 份)、vitest 单测+集成(11 例)、mock 流水线(`AGENT_MOCK=1`)、e2e 冒烟脚本、GitHub Actions CI
+
+v3(体验与产品闭环):
+
+- [x] 移动端双 tab 工作台;SSE 断流自动重连;失败一键重试;取消发布;项目重命名
+- [x] **展厅 + Remix 闭环**:已发布应用进入公开展厅 `/explore`(可关闭),任何人可一键 Remix 到自己的
+  工作台继续创造;发布应用带可关闭的归属徽章 —— 生成 → 发布 → 被发现 → 被再创造
+- [x] 演示账号(只读)降低评审门槛;品牌 favicon;autocomplete 等细节
 
 剩余已知局限:
 
@@ -96,4 +123,4 @@ npm run dev
 
 ---
 
-*本项目按笔试要求以 vibe coding 方式完成:Claude Code(Fable 5)全程驱动 —— 规划、编码、冒烟测试、部署、文档,人工只做方向决策。*
+*本项目按笔试要求以 vibe coding 方式完成:Claude Code(Fable 5)全程驱动 —— 规划、编码、冒烟测试、部署、文档,人工只做方向决策。版本演进见 [CHANGELOG.md](CHANGELOG.md)。*

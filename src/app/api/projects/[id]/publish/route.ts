@@ -1,12 +1,14 @@
 import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 import { db, now } from "@/lib/db";
-import { getUser } from "@/lib/auth";
+import { demoGuard, getUser } from "@/lib/auth";
 import { ownedProject } from "@/lib/projects";
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const user = await getUser();
   if (!user) return NextResponse.json({ error: "未登录" }, { status: 401 });
+  const blocked = demoGuard(user);
+  if (blocked) return NextResponse.json({ error: blocked }, { status: 403 });
   const { id } = await ctx.params;
   const project = ownedProject(user.id, id);
   if (!project) return NextResponse.json({ error: "项目不存在" }, { status: 404 });

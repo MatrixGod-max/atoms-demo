@@ -1,6 +1,10 @@
 import Link from "next/link";
 import { getUser } from "@/lib/auth";
+import { galleryApps, appUrl } from "@/lib/gallery";
 import PromptLauncher from "@/components/PromptLauncher";
+import AppCard from "@/components/AppCard";
+
+export const dynamic = "force-dynamic";
 
 const STAGES = [
   {
@@ -29,6 +33,7 @@ const FEATURES = [
 
 export default async function Home() {
   const user = await getUser();
+  const featured = galleryApps(3);
   return (
     <div className="flex-1 flex flex-col">
       <nav className="flex items-center justify-between px-6 py-4 max-w-6xl w-full mx-auto">
@@ -36,6 +41,9 @@ export default async function Home() {
           <span className="text-accent text-xl">⚛</span> Quark
         </Link>
         <div className="flex items-center gap-3 text-sm">
+          <Link href="/explore" className="text-muted hover:text-ink px-2 py-2">
+            展厅
+          </Link>
           {user ? (
             <Link href="/dashboard" className="btn-primary px-4 py-2">
               进入工作台
@@ -91,7 +99,7 @@ export default async function Home() {
           </div>
         </section>
 
-        <section className="pb-20">
+        <section className="pb-16">
           <div className="grid sm:grid-cols-4 gap-4">
             {FEATURES.map(([title, desc]) => (
               <div key={title} className="border-t border-line pt-4">
@@ -101,6 +109,22 @@ export default async function Home() {
             ))}
           </div>
         </section>
+
+        {featured.length > 0 && (
+          <section className="pb-20">
+            <div className="flex items-baseline justify-between mb-4">
+              <h2 className="font-semibold">来自展厅</h2>
+              <Link href="/explore" className="text-xs text-accent hover:underline">
+                全部 →
+              </Link>
+            </div>
+            <div className="grid sm:grid-cols-3 gap-5">
+              {featured.map((app) => (
+                <AppCard key={app.slug} app={app} url={appUrl(app.slug)} />
+              ))}
+            </div>
+          </section>
+        )}
       </main>
 
       <footer className="border-t border-line py-6 text-center text-xs text-muted">

@@ -30,7 +30,19 @@ function AuthFormInner({ mode }: { mode: "login" | "register" }) {
       setBusy(false);
       return;
     }
-    // If the user typed an idea on the landing page before signing up, launch it now.
+    // Continue an interrupted flow: a Remix click or a landing-page idea typed before signing up.
+    if (params.get("next") === "remix" && params.get("slug")) {
+      const remixRes = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ remixSlug: params.get("slug") }),
+      });
+      const data = await remixRes.json().catch(() => ({}));
+      if (remixRes.ok) {
+        router.push(`/project/${data.id}`);
+        return;
+      }
+    }
     if (params.get("next") === "launch") {
       const boot = sessionStorage.getItem("quark_boot");
       if (boot) {
@@ -46,7 +58,7 @@ function AuthFormInner({ mode }: { mode: "login" | "register" }) {
   }
 
   const isRegister = mode === "register";
-  const switchQuery = params.get("next") === "launch" ? "?next=launch" : "";
+  const switchQuery = params.toString() ? `?${params.toString()}` : "";
 
   return (
     <div className="flex-1 flex items-center justify-center px-6">
@@ -65,6 +77,7 @@ function AuthFormInner({ mode }: { mode: "login" | "register" }) {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="怎么称呼你(可选)"
                 maxLength={40}
+                autoComplete="nickname"
               />
             </label>
           )}
@@ -77,6 +90,7 @@ function AuthFormInner({ mode }: { mode: "login" | "register" }) {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
+              autoComplete="email"
             />
           </label>
           <label className="flex flex-col gap-1.5 text-sm">
@@ -89,6 +103,7 @@ function AuthFormInner({ mode }: { mode: "login" | "register" }) {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder={isRegister ? "至少 6 位" : "输入密码"}
+              autoComplete={isRegister ? "new-password" : "current-password"}
             />
           </label>
           {error && <p className="text-bad text-sm">{error}</p>}

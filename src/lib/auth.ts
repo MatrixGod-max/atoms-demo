@@ -9,6 +9,12 @@ export interface User {
   id: string;
   email: string;
   name: string;
+  isDemo: boolean;
+}
+
+/** Returns the refusal message for read-only demo accounts, or null when allowed. */
+export function demoGuard(user: User): string | null {
+  return user.isDemo ? "演示账号只读,注册即可体验完整功能" : null;
 }
 
 export function newId(prefix: string): string {
@@ -51,16 +57,16 @@ export async function getUser(): Promise<User | null> {
   if (!token) return null;
   const row = db
     .prepare(
-      `SELECT u.id, u.email, u.name, s.expires_at FROM sessions s
+      `SELECT u.id, u.email, u.name, u.is_demo, s.expires_at FROM sessions s
        JOIN users u ON u.id = s.user_id WHERE s.token = ?`
     )
-    .get(token) as { id: string; email: string; name: string; expires_at: number } | undefined;
+    .get(token) as { id: string; email: string; name: string; is_demo: number; expires_at: number } | undefined;
   if (!row) return null;
   if (row.expires_at < now()) {
     db.prepare("DELETE FROM sessions WHERE token = ?").run(token);
     return null;
   }
-  return { id: row.id, email: row.email, name: row.name };
+  return { id: row.id, email: row.email, name: row.name, isDemo: !!row.is_demo };
 }
 
 export async function destroySession(): Promise<void> {
