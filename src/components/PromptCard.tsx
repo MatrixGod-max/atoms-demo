@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
+import { useSpeech } from "@/lib/useSpeech";
 import { THEME_PRESETS, encodeFileBase64, inferMime, launchProject, precheckFile } from "@/lib/launch";
 
 const EXAMPLES = ["一个番茄钟专注应用", "极简记账本,支持分类统计", "习惯打卡日历", "团队站会抽签转盘"];
@@ -39,6 +40,9 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
   const [platform, setPlatform] = useState<"web" | "mobile">("web");
   const [research, setResearch] = useState(false);
   const [theme, setTheme] = useState<string | null>(null);
+  const [genMode, setGenMode] = useState<"fast" | "mixed" | "deep">("fast");
+  const [modeOpen, setModeOpen] = useState(false);
+  const speech = useSpeech((text) => setPrompt((v) => (v ? `${v}${text}` : text)));
   const [teamMode, setTeamMode] = useState(false); // visual only
   const [files, setFiles] = useState<File[]>([]);
   const [plusOpen, setPlusOpen] = useState(false);
@@ -77,12 +81,12 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
     setError("");
     closeMenus();
     if (!loggedIn) {
-      sessionStorage.setItem("quark_boot", JSON.stringify({ prompt: trimmed, platform, research, team: teamMode, theme }));
+      sessionStorage.setItem("quark_boot", JSON.stringify({ prompt: trimmed, platform, research, team: teamMode, theme, mode: genMode }));
       router.push("/register?next=launch");
       return;
     }
     setBusy(true);
-    const result = await launchProject(trimmed, platform, { research, team: teamMode, theme });
+    const result = await launchProject(trimmed, platform, { research, team: teamMode, theme, mode: genMode });
     if ("error" in result) {
       setError(result.error);
       setBusy(false);
@@ -222,8 +226,40 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
             </div>
           </div>
 
-          {/* right cluster: build target + voice + submit */}
+          {/* right cluster: mode + build target + voice + submit */}
           <div className="flex items-center gap-2">
+            <div className="relative">
+              <button
+                type="button"
+                className="flex items-center gap-1.5 px-3 h-9 rounded-lg border border-line text-sm text-ink hover:bg-bg-deep transition-colors"
+                title="生成模式:快速(全V3)/ 混合(R1思考+V3编码)/ 深度(全R1)"
+                onClick={() => {
+                  setPlusOpen(false);
+                  setThemeOpen(false);
+                  setBuildOpen(false);
+                  setModeOpen(!modeOpen);
+                }}
+              >
+                <span>{genMode === "fast" ? "⚡ 快速" : genMode === "mixed" ? "🧠 混合" : "🐢 深度"}</span>
+                <span className="text-[10px] text-muted">▾</span>
+              </button>
+              {modeOpen && (
+                <div className="absolute right-0 top-11 w-52 card rounded-xl p-1.5 shadow-lg z-30">
+                  {(
+                    [
+                      ["fast", "⚡ 快速", "全阶段 V3,最快"],
+                      ["mixed", "🧠 混合", "R1 思考 + V3 编码"],
+                      ["deep", "🐢 深度", "全阶段 R1,最强最慢"],
+                    ] as const
+                  ).map(([m, label, desc]) => (
+                    <button key={m} type="button" className={menuItem} onClick={() => { setGenMode(m); setModeOpen(false); }}>
+                      <span className="flex-1 text-left">{label}<span className="block text-[11px] text-muted">{desc}</span></span>
+                      {genMode === m && <span className="text-accent">✓</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <div className="relative">
               <button
                 type="button"
@@ -231,6 +267,7 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
                 onClick={() => {
                   setPlusOpen(false);
                   setThemeOpen(false);
+                  setModeOpen(false);
                   setBuildOpen(!buildOpen);
                 }}
               >
@@ -255,9 +292,20 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
             </div>
             <button
               type="button"
-              aria-label="语音输入(即将推出)"
-              title="语音输入(即将推出)"
-              className="w-9 h-9 rounded-full flex items-center justify-center text-muted hover:text-ink hover:bg-bg-deep transition-colors"
+              aria-label={speech.state === "listening" ? "停止语音输入" : "语音输入"}
+              title={
+                speech.state === "unsupported"
+                  ? "当前浏览器不支持语音输入,建议使用 Chrome"
+                  : speech.error || (speech.state === "listening" ? "正在听,点击停止" : "语音输入(中文)")
+              }
+              className={`w-9 h-9 rounded-full flex items-center justify-center transition-colors ${
+                speech.state === "listening"
+                  ? "bg-bad/10 text-bad animate-pulse"
+                  : speech.state === "unsupported"
+                    ? "text-muted/40 cursor-not-allowed"
+                    : "text-muted hover:text-ink hover:bg-bg-deep"
+              }`}
+              onClick={() => speech.state !== "unsupported" && speech.toggle()}
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
                 <rect x="1" y="6" width="2" height="4" rx="1" />

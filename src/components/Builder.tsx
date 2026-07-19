@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { THEME_PRESETS } from "@/lib/launch";
+import { useSpeech } from "@/lib/useSpeech";
 
 interface Message {
   id: string;
@@ -28,6 +29,7 @@ interface ProjectDetail {
     published_version_id: string | null;
     in_gallery: number;
     platform: "web" | "mobile";
+    theme: string | null;
   };
   messages: Message[];
   versions: Version[];
@@ -119,6 +121,8 @@ export default function Builder({ projectId }: { projectId: string }) {
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
   const [research, setResearch] = useState(false);
   const [team, setTeam] = useState(false);
+  const [targetOpen, setTargetOpen] = useState(false);
+  const speech = useSpeech((text) => setInput((v) => (v ? `${v}${text}` : text)));
   const [genMode, setGenMode] = useState<"fast" | "mixed" | "deep">("fast");
   const [previewReady, setPreviewReady] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
@@ -296,7 +300,7 @@ export default function Builder({ projectId }: { projectId: string }) {
   );
 
   const generate = useCallback(
-    async (prompt: string, researchOverride?: boolean, teamOverride?: boolean) => {
+    async (prompt: string, researchOverride?: boolean, teamOverride?: boolean, modeOverride?: "fast" | "mixed" | "deep") => {
       setGenerating(true);
       resetRunState();
       setMessages((m) => [...m, { id: `tmp_${Date.now()}`, role: "user", content: prompt }]);
@@ -304,7 +308,7 @@ export default function Builder({ projectId }: { projectId: string }) {
         const res = await fetch(`/api/projects/${projectId}/generate`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ prompt, research: researchOverride ?? research, team: teamOverride ?? team, mode: genMode }),
+          body: JSON.stringify({ prompt, research: researchOverride ?? research, team: teamOverride ?? team, mode: modeOverride ?? genMode }),
         });
         const data = await res.json().catch(() => ({}));
         if (res.status === 401) {
@@ -344,19 +348,22 @@ export default function Builder({ projectId }: { projectId: string }) {
         let bootPrompt = pending;
         let bootResearch = false;
         let bootTeam = false;
+        let bootMode: "fast" | "mixed" | "deep" = "fast";
         try {
           const parsed = JSON.parse(pending);
           if (parsed && typeof parsed.prompt === "string") {
             bootPrompt = parsed.prompt;
             bootResearch = !!parsed.research;
             bootTeam = !!parsed.team;
+            if (parsed.mode === "mixed" || parsed.mode === "deep") bootMode = parsed.mode;
           }
         } catch {
           // legacy plain-string pending value
         }
         if (bootResearch) setResearch(true);
         if (bootTeam) setTeam(true);
-        generate(bootPrompt, bootResearch, bootTeam);
+        if (bootMode !== "fast") setGenMode(bootMode);
+        generate(bootPrompt, bootResearch, bootTeam, bootMode);
       }
     })();
   }, [load, generate, attachJob, resetRunState, projectId]);
@@ -410,7 +417,7 @@ export default function Builder({ projectId }: { projectId: string }) {
     setPublishBusy(false);
   }
 
-  async function patchProject(body: { name?: string; inGallery?: boolean; platform?: "web" | "mobile" }) {
+  async function patchProject(body: { name?: string; inGallery?: boolean; platform?: "web" | "mobile"; theme?: string | null }) {
     const res = await fetch(`/api/projects/${projectId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -468,10 +475,13 @@ export default function Builder({ projectId }: { projectId: string }) {
     else pushError((await res.json().catch(() => ({}))).error || "下线失败");
   }
 
-  function switchTheme(theme: string) {
+  async function switchTheme(theme: string | null) {
     setThemeOpen(false);
+    await patchProject(theme ? { theme } : ({ theme: null } as never));
     generate(
-      `【主题变换】把应用整体视觉主题切换为「${theme}」:只调整配色、字体气质、圆角、阴影、背景等视觉层,布局结构、功能逻辑、文案与数据处理完全保持不变。`
+      theme
+        ? `【主题变换】把应用整体视觉主题切换为「${theme}」:只调整配色、字体气质、圆角、阴影、背景等视觉层,布局结构、功能逻辑、文案与数据处理完全保持不变。`
+        : "【主题变换】把应用视觉恢复为默认的现代简洁风格:只调整视觉层,布局结构、功能逻辑、文案与数据处理完全保持不变。"
     );
   }
 
@@ -524,28 +534,42 @@ export default function Builder({ projectId }: { projectId: string }) {
               setRenaming(true);
             }}
           >
-            {project && (
-              <span
-                className="mr-1.5 cursor-pointer hover:opacity-70"
-                title={`构建目标:${project.platform === "mobile" ? "移动应用" : "网页应用"}(点击切换)`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (generating) return;
-                  const next = project.platform === "mobile" ? "web" : "mobile";
-                  if (
-                    confirm(
-                      `把构建目标切换为「${next === "mobile" ? "📱 移动应用" : "🌐 网页应用"}」?下次生成将按新目标的规范执行,预览与发布形态随之切换。`
-                    )
-                  ) {
-                    patchProject({ platform: next });
-                  }
-                }}
-              >
-                {project.platform === "mobile" ? "📱" : "🌐"}
-              </span>
-            )}
             {project?.name ?? "加载中…"}
           </h1>
+        )}
+        {project && (
+          <div className="relative">
+            <button
+              className="btn-ghost px-2.5 py-1.5 text-xs"
+              onClick={() => setTargetOpen(!targetOpen)}
+              disabled={generating}
+              title="构建目标:切换后下次生成按新目标规范,预览与发布形态随之切换"
+            >
+              {project.platform === "mobile" ? "📱 移动" : "🌐 网页"} ▾
+            </button>
+            {targetOpen && (
+              <div className="absolute left-0 top-full mt-1 card p-1.5 z-20 flex flex-col min-w-36">
+                {(
+                  [
+                    ["web", "🌐 网页应用"],
+                    ["mobile", "📱 移动应用"],
+                  ] as const
+                ).map(([pf, label]) => (
+                  <button
+                    key={pf}
+                    className="text-left px-3 py-1.5 text-xs rounded-md hover:bg-accent-soft flex items-center gap-2"
+                    onClick={() => {
+                      setTargetOpen(false);
+                      if (pf !== project.platform) patchProject({ platform: pf });
+                    }}
+                  >
+                    <span className="flex-1">{label}</span>
+                    {project.platform === pf && <span className="text-accent">✓</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         )}
         {versions.length > 0 && (
           <div className="relative">
@@ -555,10 +579,16 @@ export default function Builder({ projectId }: { projectId: string }) {
               disabled={generating || !project?.current_version_id}
               title="一键换肤:只改视觉,不改功能,产生可回滚的新版本"
             >
-              🎨 换主题
+              🎨 {project?.theme ?? "换主题"}
             </button>
             {themeOpen && (
               <div className="absolute right-0 top-full mt-1 card p-1.5 z-20 flex flex-col min-w-32">
+                <button
+                  className="text-left px-3 py-1.5 text-xs rounded-md hover:bg-accent-soft text-muted"
+                  onClick={() => switchTheme(null)}
+                >
+                  默认(清除主题)
+                </button>
                 {THEME_PRESETS.map((t) => (
                   <button
                     key={t}
@@ -924,6 +954,25 @@ export default function Builder({ projectId }: { projectId: string }) {
                   }
                 }}
               />
+              <button
+                className={`px-3 rounded-lg border text-sm transition-colors ${
+                  speech.state === "listening"
+                    ? "border-bad/50 text-bad animate-pulse"
+                    : speech.state === "unsupported"
+                      ? "border-line text-muted/40 cursor-not-allowed"
+                      : "border-line text-muted hover:text-ink"
+                }`}
+                title={
+                  speech.state === "unsupported"
+                    ? "当前浏览器不支持语音输入,建议使用 Chrome"
+                    : speech.error || (speech.state === "listening" ? "正在听,点击停止" : "语音输入(中文)")
+                }
+                onClick={() => speech.state !== "unsupported" && speech.toggle()}
+                disabled={generating}
+                aria-label="语音输入"
+              >
+                🎙
+              </button>
               <button className="btn-primary px-4 text-sm" onClick={send} disabled={generating || !input.trim()}>
                 发送
               </button>

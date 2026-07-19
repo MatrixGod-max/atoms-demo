@@ -47,9 +47,16 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   const { id } = await ctx.params;
   if (!ownedProject(user.id, id)) return NextResponse.json({ error: "项目不存在" }, { status: 404 });
 
-  const { name, inGallery, platform } = await req.json().catch(() => ({}));
+  const { name, inGallery, platform, theme } = await req.json().catch(() => ({}));
   if (typeof name === "string" && name.trim()) {
     db.prepare("UPDATE projects SET name = ?, updated_at = ? WHERE id = ?").run(name.trim().slice(0, 40), now(), id);
+  }
+  if (theme === null || (typeof theme === "string" && theme.trim())) {
+    db.prepare("UPDATE projects SET theme = ?, updated_at = ? WHERE id = ?").run(
+      theme === null ? null : theme.trim().slice(0, 20),
+      now(),
+      id
+    );
   }
   if (platform === "web" || platform === "mobile") {
     db.prepare("UPDATE projects SET platform = ?, updated_at = ? WHERE id = ?").run(platform, now(), id);

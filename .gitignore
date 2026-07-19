@@ -52,3 +52,5 @@ data/
 
 data-dev/
 docs/*.tmp.png
+
+.next-dev/

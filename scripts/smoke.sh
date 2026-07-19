@@ -127,6 +127,27 @@ curl -fsS -b "$JAR" "$BASE_URL/api/projects/$YPROJ" | grep -q '"platform":"mobil
 LANDING=$(curl -fsS "$BASE_URL/")
 echo "$LANDING" | grep -q "Fusion" || fail "Fusion brand missing on landing"
 
+step "persistent theme: applied on first gen and survives iteration (third account)"
+curl -fsS -c "$JAR" -X POST "$BASE_URL/api/auth/register" \
+  -H 'content-type: application/json' \
+  -d "{\"email\":\"t-$EMAIL\",\"password\":\"Smoke2026ci\"}" | grep -q '"ok":true' || fail "register third account"
+ZPROJ=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects" \
+  -H 'content-type: application/json' -d '{"prompt":"smoke 主题","theme":"莫兰迪"}' | sed -E 's/.*"id":"([^"]+)".*/\1/')
+curl -fsS -b "$JAR" "$BASE_URL/api/projects/$ZPROJ" | grep -q '"theme":"莫兰迪"' || fail "theme not stored on create"
+ZJOB=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects/$ZPROJ/generate" \
+  -H 'content-type: application/json' -d '{"prompt":"smoke 主题"}' | sed -E 's/.*"jobId":"([^"]+)".*/\1/')
+ZS=$(timeout 120 curl -fsS -N -b "$JAR" "$BASE_URL/api/jobs/$ZJOB/stream")
+echo "$ZS" | grep -q '"type":"version"' || fail "theme gen"
+curl -fsS -b "$JAR" "$BASE_URL/api/projects/$ZPROJ" | grep -q 'theme: 莫兰迪' || fail "theme marker missing in v1"
+ZJOB2=$(curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects/$ZPROJ/generate" \
+  -H 'content-type: application/json' -d '{"prompt":"smoke 迭代"}' | sed -E 's/.*"jobId":"([^"]+)".*/\1/')
+ZS2=$(timeout 120 curl -fsS -N -b "$JAR" "$BASE_URL/api/jobs/$ZJOB2/stream")
+echo "$ZS2" | grep -q '"num":2' || fail "theme iteration"
+curl -fsS -b "$JAR" "$BASE_URL/api/projects/$ZPROJ" | grep -q 'theme: 莫兰迪' || fail "theme not persistent across iteration"
+curl -fsS -b "$JAR" -X PATCH "$BASE_URL/api/projects/$ZPROJ" \
+  -H 'content-type: application/json' -d '{"theme":null}' | grep -q '"ok":true' || fail "theme clear"
+curl -fsS -b "$JAR" "$BASE_URL/api/projects/$ZPROJ" | grep -q '"theme":null' || fail "theme clear persisted"
+
 step "resources: templates listed, template quick-start, CORS preflight"
 TCOUNT=$(curl -fsS "$BASE_URL/api/templates" | grep -o '"id":"tpl_' | wc -l)
 [ "$TCOUNT" -ge 6 ] || fail "expected >=6 templates, got $TCOUNT"
