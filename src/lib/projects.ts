@@ -18,6 +18,8 @@ export interface ProjectRow {
   fused_from: string | null;
   engine: "single" | "project";
   platform: "web" | "mobile";
+  theme: string | null;
+  connectors: string | null;
 }
 
 export function ownedProject(userId: string, projectId: string): ProjectRow | undefined {

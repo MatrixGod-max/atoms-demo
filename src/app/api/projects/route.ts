@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db, now } from "@/lib/db";
 import { getUser, newId } from "@/lib/auth";
+import { CONNECTORS, MAX_PROJECT_CONNECTORS } from "@/lib/connectorRegistry";
 
 export async function GET() {
   const user = await getUser();
@@ -21,7 +22,10 @@ export async function POST(req: Request) {
   const { prompt, remixSlug, templateId, platform, theme, connectors, goal, fuseSlugs, engine } = await req.json().catch(() => ({}));
   // Absent engine stays "single" so older clients/flows keep their behavior; the UI sends it explicitly.
   const chosenEngine = engine === "project" ? "project" : "single";
-  const chosenConnectors = Array.isArray(connectors) && connectors.length ? JSON.stringify(connectors.slice(0, 5)) : null;
+  const validConnectors = Array.isArray(connectors)
+    ? connectors.filter((c: unknown) => CONNECTORS.some((k) => k.id === c)).slice(0, MAX_PROJECT_CONNECTORS)
+    : [];
+  const chosenConnectors = validConnectors.length ? JSON.stringify(validConnectors) : null;
   const chosenTheme = typeof theme === "string" && theme.trim() ? theme.trim().slice(0, 20) : null;
   const chosenPlatform = platform === "mobile" ? "mobile" : "web";
   const chosenGoal = typeof goal === "string" && goal.trim() ? goal.trim().slice(0, 500) : null;

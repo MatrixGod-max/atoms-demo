@@ -1,5 +1,25 @@
 # Changelog
 
+## v19 — 连接器扩容:GitHub · Figma · Notion · Slack · Google Drive(2026-07-19)
+
+- 五个"规划中"连接器全部真实现,连接器总数 3 → 8:GitHub(仓库/Issues/文件)、
+  Figma(文件结构/节点渲染 PNG)、Notion(查数据库/读页面)、Slack(发消息)、
+  Google Drive(公开文件/文档/表格,免凭证)
+- **凭证模式 = 用户自填令牌**(零 OAuth 注册):GitHub PAT / Figma PAT / Notion 集成
+  令牌 / Slack Incoming Webhook,在 设置 → 连接器凭证 保存(本地 SQLite,API 只回掩码,
+  可换可清);Slack Webhook 存入与调用双重域名校验(SSRF 防线)
+- **凭证连接器仅属主工作台预览可用**:沙箱预览 iframe 无 cookie,平台向属主预览注入
+  30 分钟短时令牌(内存态,重启自愈);连接器 API 按 kind 门禁 —— 无令牌 403、无凭证
+  400 引导配置、Slack 5 条/分/用户;发布/导出产物自动注入明确报错桩,免凭证连接器
+  (含新 gdrive)预览与发布均可用 —— **工作台预览首次获得连接器注入**(此前 window.quark
+  在预览中不存在)
+- 各连接器严格参数白名单 + 响应裁剪(GitHub 文件 ≤200KB/内容 ≤100k 字符、Notion 行/块
+  上限、Figma 页/节点上限);凭证类缓存按用户隔离、响应 private no-store
+- Engineer 提示词按 免凭证/凭证 分栏说明可用范围与降级要求,并入 system base
+  (迭代与构建修复轮同样获益);修复 S3/Netlify 导出漏传 connectors 的存量 bug
+- 首页/工作台连接器面板改为注册表驱动(🔑 标注 + 设置页入口),项目连接器上限 5 → 8;
+  tests/connectors.test.ts 23 例(CONNECTOR_MOCK 确定性桩),smoke 加 403 门禁检查
+
 ## v18 — 原生打包:云端 Android APK 构建(2026-07-19)
 
 - 🤖 **移动项目一键出 APK**:工作台「打包」面板触发 → 平台把当前版本源码流式送到远程

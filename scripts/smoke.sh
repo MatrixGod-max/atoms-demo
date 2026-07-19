@@ -194,6 +194,8 @@ curl -fsS -b "$JAR" "$BASE_URL/api/projects/$NPROJ" | grep -q 'connectors: weath
 curl -fsS "$BASE_URL/api/connectors/qr?text=smoke" | grep -q '"svg"' || fail "qr connector"
 QCODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/connectors/hack")
 [ "$QCODE" = "400" ] || fail "unknown connector should 400, got $QCODE"
+TCODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/connectors/github?op=repo&repo=a/b")
+[ "$TCODE" = "403" ] || fail "token connector without preview token should 403, got $TCODE"
 
 step "domains: bind, check endpoint, /d serving, release"
 DNAME="smoke$(date +%s | tail -c 6)$RANDOM"

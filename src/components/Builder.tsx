@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { THEME_PRESETS, precheckFile } from "@/lib/launch";
+import { CONNECTORS as CONNECTOR_LIST } from "@/lib/connectorRegistry";
 import { INSPECTOR_SCRIPT } from "@/lib/inspector";
 import { useSpeech } from "@/lib/useSpeech";
 
@@ -44,6 +45,7 @@ interface ProjectDetail {
   versions: Version[];
   currentHtml: string | null;
   currentFiles: Record<string, string> | null;
+  connectorsScript: string;
   attachments: AttachmentMeta[];
   deployments: Deployment[];
   deployTargets: DeployTarget[];
@@ -1640,29 +1642,33 @@ export default function Builder({ projectId }: { projectId: string }) {
                   🔌 连接器{(() => { try { const c = JSON.parse(project?.connectors ?? "[]"); return c.length ? ` ${c.length}` : ""; } catch { return ""; } })()}
                 </button>
                 {connOpen && (
-                  <div className="absolute bottom-full mb-1 left-0 card p-2 z-20 flex flex-col gap-1 min-w-40">
-                    {(
-                      [
-                        ["weather", "🌦 天气"],
-                        ["rates", "💱 汇率"],
-                        ["qr", "🔲 二维码"],
-                      ] as const
-                    ).map(([id, label]) => {
+                  <div className="absolute bottom-full mb-1 left-0 card p-2 z-20 flex flex-col gap-1 w-56">
+                    {CONNECTOR_LIST.map((info) => {
                       let enabled: string[] = [];
                       try { enabled = JSON.parse(project?.connectors ?? "[]"); } catch { enabled = []; }
-                      const on = enabled.includes(id);
+                      const on = enabled.includes(info.id);
                       return (
                         <button
-                          key={id}
+                          key={info.id}
                           className={`text-left px-2.5 py-1.5 text-xs rounded-md flex items-center gap-2 ${on ? "text-accent bg-accent-soft" : "text-muted hover:text-ink hover:bg-bg-deep"}`}
-                          onClick={() => patchProject({ connectors: on ? enabled.filter((x) => x !== id) : [...enabled, id] })}
+                          title={info.desc}
+                          onClick={() => patchProject({ connectors: on ? enabled.filter((x) => x !== info.id) : [...enabled, info.id] })}
                         >
-                          <span className="flex-1">{label}</span>
+                          <span className="flex-1">
+                            {info.icon} {info.name}
+                            {info.kind === "token" && <span className="ml-1">🔑</span>}
+                          </span>
                           {on && <span>✓</span>}
                         </button>
                       );
                     })}
-                    <p className="text-[10px] text-muted px-1 pt-1 border-t border-line">改动在下次生成时生效</p>
+                    <p className="text-[10px] text-muted px-1 pt-1 border-t border-line">
+                      改动在下次生成时生效;🔑 需在
+                      <Link href="/settings" className="text-accent hover:underline mx-0.5">
+                        设置
+                      </Link>
+                      配置凭证,仅工作台预览可用
+                    </p>
                   </div>
                 )}
               </div>
@@ -1791,7 +1797,7 @@ export default function Builder({ projectId }: { projectId: string }) {
                         <iframe
                           className="w-full h-full bg-white"
                           sandbox="allow-scripts allow-forms allow-modals allow-popups"
-                          srcDoc={pickMode ? html + INSPECTOR_SCRIPT : html}
+                          srcDoc={(detail?.connectorsScript ?? "") + (pickMode ? html + INSPECTOR_SCRIPT : html)}
                           title="应用预览"
                         />
                       </div>
@@ -1800,7 +1806,7 @@ export default function Builder({ projectId }: { projectId: string }) {
                     <iframe
                       className="w-full flex-1 bg-white"
                       sandbox="allow-scripts allow-forms allow-modals allow-popups"
-                      srcDoc={pickMode ? html + INSPECTOR_SCRIPT : html}
+                      srcDoc={(detail?.connectorsScript ?? "") + (pickMode ? html + INSPECTOR_SCRIPT : html)}
                       title="应用预览"
                     />
                   )}

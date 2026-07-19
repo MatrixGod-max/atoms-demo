@@ -204,6 +204,16 @@ function createDb(): DatabaseSync {
     );
     CREATE INDEX IF NOT EXISTS idx_app_reports_project ON app_reports(project_id, status, created_at);
   `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS connector_credentials (
+      user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      connector  TEXT NOT NULL,
+      secret     TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (user_id, connector)
+    );
+  `);
   backfillArtifacts(db);
   return db;
 }

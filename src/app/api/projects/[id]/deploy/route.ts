@@ -46,6 +46,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
         html: version.html,
         artifactSeq: artifact?.seq ?? 0,
         token: typeof token === "string" ? token : undefined,
+        connectors: project.connectors,
       },
       provider
     );

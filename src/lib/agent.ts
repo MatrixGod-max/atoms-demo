@@ -754,25 +754,30 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
 
   // ---- Stage 2: Engineer (streamed) ----
   yield { type: "stage", stage: "engineer", status: "start", model: modelBadge(sm.engineer) };
-  const engineerSystemBase = `你是 Quark 平台的工程师智能体(Engineer),负责把产品需求实现为${
-    isProject ? `多文件 React 工程(${isMobile ? "移动" : "网页"}应用)` : `单文件${isMobile ? "移动" : "网页"}应用`
-  }。\n${isProject ? ENGINEER_RULES_PROJECT : ENGINEER_RULES}`;
-  const engineerMessages: ChatMessage[] = [
-    {
-      role: "system",
-      content: `${engineerSystemBase}${isMobile ? ENGINEER_RULES_MOBILE_EXTRA : ""}${
-        input.theme
-          ? `\n【主题规范】本项目的视觉主题固定为「${input.theme}」:配色、字体气质、圆角、阴影与背景必须符合该主题,且在后续所有修改中保持一致。`
+  const enabledConnectors = CONNECTORS.filter((c) => input.connectors?.includes(c.id));
+  const keylessConn = enabledConnectors.filter((c) => c.kind === "keyless");
+  const tokenConn = enabledConnectors.filter((c) => c.kind === "token");
+  const connectorContext = enabledConnectors.length
+    ? `\n【连接器】本项目启用了平台连接器,调用统一通过 window.quark.connectors(存在性判断后使用),不得直接 fetch 外部网络;所有调用必须 try/catch,失败时展示占位数据与提示。${
+        keylessConn.length
+          ? `\n免凭证连接器(工作台预览与发布后均可用):\n${keylessConn.map((c) => `- ${c.name}: ${c.doc}`).join("\n")}`
           : ""
       }${
-        input.connectors?.length
-          ? `\n【连接器】本项目启用了以下平台连接器(发布后可用,预览沙箱可能不可用,必须做加载态与失败降级,失败时展示占位数据):\n${CONNECTORS.filter((c) => input.connectors!.includes(c.id))
-              .map((c) => `- ${c.name}: ${c.doc}`)
-              .join("\n")}\n调用统一通过 window.quark.connectors(存在性判断后使用),不得直接 fetch 外部网络。`
+        tokenConn.length
+          ? `\n凭证连接器(仅属主工作台预览可用,发布后调用必定失败,降级路径必须完善):\n${tokenConn.map((c) => `- ${c.name}: ${c.doc}`).join("\n")}`
           : ""
-      }`,
-    },
-  ];
+      }`
+    : "";
+  // Theme/connector context lives in the shared system base so iteration and
+  // build/validator fix rounds inherit it too.
+  const engineerSystemBase = `你是 Quark 平台的工程师智能体(Engineer),负责把产品需求实现为${
+    isProject ? `多文件 React 工程(${isMobile ? "移动" : "网页"}应用)` : `单文件${isMobile ? "移动" : "网页"}应用`
+  }。\n${isProject ? ENGINEER_RULES_PROJECT : ENGINEER_RULES}${isMobile ? ENGINEER_RULES_MOBILE_EXTRA : ""}${
+    input.theme
+      ? `\n【主题规范】本项目的视觉主题固定为「${input.theme}」:配色、字体气质、圆角、阴影与背景必须符合该主题,且在后续所有修改中保持一致。`
+      : ""
+  }${connectorContext}`;
+  const engineerMessages: ChatMessage[] = [{ role: "system", content: engineerSystemBase }];
   if (isIteration) {
     const recent = input.history
       .slice(-6)

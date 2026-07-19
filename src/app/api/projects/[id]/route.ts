@@ -7,7 +7,7 @@ import { now } from "@/lib/db";
 import { listAttachments } from "@/lib/attachments";
 import { listDeployments, DEPLOY_TARGETS } from "@/lib/deploy";
 import { validateDomainName } from "@/lib/domains";
-import { CONNECTORS } from "@/lib/connectors";
+import { CONNECTORS, MAX_PROJECT_CONNECTORS, connectorsHelper, mintPreviewToken, parseConnectors } from "@/lib/connectors";
 import { parseStoredFiles } from "@/lib/projectFiles";
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
@@ -30,12 +30,20 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     : undefined;
 
   const active = jobRunner.activeJobForProject(id);
+  // Preview helper: token connectors need a short-lived owner-scoped token —
+  // the sandboxed preview iframe has an opaque origin and can't send cookies.
+  const enabled = parseConnectors(project.connectors);
+  const needsToken = enabled.some((c) => CONNECTORS.find((k) => k.id === c)?.kind === "token");
+  const connectorsScript = enabled.length
+    ? connectorsHelper(enabled, "", needsToken ? mintPreviewToken(user.id, id) : undefined)
+    : "";
   return NextResponse.json({
     project,
     messages,
     versions,
     currentHtml: current?.html ?? null,
     currentFiles: parseStoredFiles(current?.files),
+    connectorsScript,
     attachments: listAttachments(id),
     deployments: listDeployments(id),
     deployTargets: DEPLOY_TARGETS,
@@ -66,7 +74,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     db.prepare("UPDATE projects SET platform = ?, updated_at = ? WHERE id = ?").run(platform, now(), id);
   }
   if (Array.isArray(connectors)) {
-    const valid = connectors.filter((c) => CONNECTORS.some((k) => k.id === c)).slice(0, 5);
+    const valid = connectors.filter((c) => CONNECTORS.some((k) => k.id === c)).slice(0, MAX_PROJECT_CONNECTORS);
     db.prepare("UPDATE projects SET connectors = ?, updated_at = ? WHERE id = ?").run(
       valid.length ? JSON.stringify(valid) : null,
       now(),

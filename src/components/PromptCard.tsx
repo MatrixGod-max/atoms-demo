@@ -4,15 +4,9 @@ import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { useSpeech } from "@/lib/useSpeech";
 import { CLIENT_MAX_ATTACHMENTS, THEME_PRESETS, encodeFileBase64, inferMime, launchProject, precheckFile } from "@/lib/launch";
+import { CONNECTORS as CONNECTOR_LIST } from "@/lib/connectorRegistry";
 
 const EXAMPLES = ["一个番茄钟专注应用", "极简记账本,支持分类统计", "习惯打卡日历", "团队站会抽签转盘"];
-
-const REAL_CONNECTORS = [
-  ["weather", "🌦 天气"],
-  ["rates", "💱 汇率"],
-  ["qr", "🔲 二维码"],
-] as const;
-const PLANNED_CONNECTORS = ["GitHub", "Figma", "Google Drive", "Notion", "Slack"];
 
 function fmtSize(bytes: number) {
   return bytes >= 1024 ? `${(bytes / 1024).toFixed(bytes >= 10240 ? 0 : 1)}KB` : `${bytes}B`;
@@ -204,29 +198,25 @@ export default function PromptCard({ loggedIn, compact = false }: { loggedIn: bo
                   {connectorsOpen && (
                     <div className="px-3 pb-2">
                       <div className="flex flex-wrap gap-1.5">
-                        {REAL_CONNECTORS.map(([id, label]) => (
+                        {CONNECTOR_LIST.map((info) => (
                           <button
-                            key={id}
+                            key={info.id}
                             type="button"
+                            title={info.desc}
                             className={`px-2 py-1 text-[11px] rounded-md border transition-colors ${
-                              connectors.includes(id) ? "border-accent text-accent bg-accent-soft" : "border-line text-muted hover:text-ink"
+                              connectors.includes(info.id) ? "border-accent text-accent bg-accent-soft" : "border-line text-muted hover:text-ink"
                             }`}
                             onClick={() =>
-                              setConnectors((cs) => (cs.includes(id) ? cs.filter((x) => x !== id) : [...cs, id]))
+                              setConnectors((cs) => (cs.includes(info.id) ? cs.filter((x) => x !== info.id) : [...cs, info.id]))
                             }
                           >
-                            {label}
-                            {connectors.includes(id) ? " ✓" : ""}
+                            {info.icon} {info.name}
+                            {info.kind === "token" ? " 🔑" : ""}
+                            {connectors.includes(info.id) ? " ✓" : ""}
                           </button>
                         ))}
                       </div>
-                      <div className="flex flex-wrap gap-1.5 mt-1.5">
-                        {PLANNED_CONNECTORS.map((c) => (
-                          <span key={c} className="px-2 py-1 text-[11px] rounded-md border border-line text-muted/50" title="规划中">
-                            {c}
-                          </span>
-                        ))}
-                      </div>
+                      <p className="text-[10px] text-muted mt-1.5">🔑 需在 设置→连接器凭证 配置令牌,仅工作台预览可用</p>
                     </div>
                   )}
                   <div className="border-t border-line my-1" />

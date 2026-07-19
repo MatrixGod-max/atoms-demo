@@ -48,18 +48,19 @@ interface DeployCtx {
   html: string;
   artifactSeq: number;
   token?: string;
+  connectors?: string | null;
 }
 
 async function deployS3(ctx: DeployCtx): Promise<{ bucket: string; url: string }> {
   const bucket = `quark-app-${ctx.slug}-${randomBytes(3).toString("hex")}`;
-  const html = exportAppHtml(ctx.html, ctx.slug, { platform: ctx.platform });
+  const html = exportAppHtml(ctx.html, ctx.slug, { platform: ctx.platform, connectors: ctx.connectors });
   const url = await deployToS3Website(bucket, html);
   return { bucket, url };
 }
 
 async function deployNetlify(ctx: DeployCtx): Promise<{ bucket: string | null; url: string }> {
   if (!ctx.token) throw new Error("需要 Netlify Personal Access Token");
-  const html = exportAppHtml(ctx.html, ctx.slug, { platform: ctx.platform });
+  const html = exportAppHtml(ctx.html, ctx.slug, { platform: ctx.platform, connectors: ctx.connectors });
   // Minimal official flow: create site, then deploy files by digest.
   const siteRes = await fetch("https://api.netlify.com/api/v1/sites", {
     method: "POST",
