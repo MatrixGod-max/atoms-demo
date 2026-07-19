@@ -1,18 +1,16 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { getUser } from "@/lib/auth";
 import { galleryApps, appUrl } from "@/lib/gallery";
 import AppCard from "@/components/AppCard";
 import TemplateCard, { type TemplateMeta } from "@/components/TemplateCard";
 
 export const dynamic = "force-dynamic";
 
-export const metadata = { title: "资源中心 — Quark" };
+export const metadata = { title: "资源 — Atoms" };
 
 export default async function Resources({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const { tab } = await searchParams;
   const active = tab === "templates" ? "templates" : "discover";
-  const user = await getUser();
   const apps = galleryApps(12);
   const templates = db
     .prepare("SELECT id, name, category, platform, description FROM templates ORDER BY created_at")
@@ -21,27 +19,10 @@ export default async function Resources({ searchParams }: { searchParams: Promis
 
   return (
     <div className="flex-1 flex flex-col">
-      <nav className="flex items-center justify-between px-6 py-4 max-w-6xl w-full mx-auto">
-        <Link href="/" className="flex items-center gap-2 font-semibold tracking-wide">
-          <span className="text-accent text-xl">⚛</span> Quark
-        </Link>
-        <div className="flex items-center gap-3 text-sm">
-          {user ? (
-            <Link href="/dashboard" className="btn-primary px-4 py-2">
-              进入工作台
-            </Link>
-          ) : (
-            <Link href="/register" className="btn-primary px-4 py-2">
-              免费注册
-            </Link>
-          )}
-        </div>
-      </nav>
-
-      <main className="flex-1 max-w-6xl w-full mx-auto px-6 pb-16">
-        <header className="mt-6 mb-6">
+      <main className="flex-1 max-w-5xl w-full mx-auto px-6 pb-16">
+        <header className="mt-8 mb-6">
           <p className="font-mono text-xs tracking-[0.25em] text-muted mb-2">RESOURCES</p>
-          <h1 className="text-2xl font-bold">资源中心</h1>
+          <h1 className="text-2xl font-bold">资源</h1>
           <div className="flex gap-1 mt-5 border-b border-line">
             {(
               [

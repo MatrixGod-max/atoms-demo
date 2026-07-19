@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
-import { launchProject } from "./PromptLauncher";
+import { launchProject } from "@/lib/launch";
 
 function AuthFormInner({ mode }: { mode: "login" | "register" }) {
   const router = useRouter();
@@ -61,18 +61,22 @@ function AuthFormInner({ mode }: { mode: "login" | "register" }) {
         sessionStorage.removeItem("quark_boot");
         let prompt = boot;
         let platform: "web" | "mobile" = "web";
+        let research = false;
+        let theme: string | null = null;
         try {
           const parsed = JSON.parse(boot);
           if (parsed.prompt) {
             prompt = parsed.prompt;
             platform = parsed.platform === "mobile" ? "mobile" : "web";
+            research = !!parsed.research;
+            theme = typeof parsed.theme === "string" ? parsed.theme : null;
           }
         } catch {
           // legacy plain-string boot value
         }
-        const id = await launchProject(prompt, platform);
-        if (id) {
-          router.push(`/project/${id}`);
+        const result = await launchProject(prompt, platform, { research, theme });
+        if ("id" in result) {
+          router.push(`/project/${result.id}`);
           return;
         }
       }
@@ -87,7 +91,7 @@ function AuthFormInner({ mode }: { mode: "login" | "register" }) {
     <div className="flex-1 flex items-center justify-center px-6">
       <div className="w-full max-w-sm">
         <Link href="/" className="flex items-center justify-center gap-2 font-semibold text-lg mb-8">
-          <span className="text-accent text-2xl">⚛</span> Quark
+          <span className="text-accent text-2xl">⚛</span> Atoms
         </Link>
         <form className="card p-6 flex flex-col gap-4" onSubmit={submit}>
           <h1 className="font-semibold text-lg">{isRegister ? "创建账号" : "欢迎回来"}</h1>

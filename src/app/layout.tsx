@@ -13,8 +13,8 @@ const jetbrains = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Quark — 智能体驱动的应用生成平台",
-  description: "描述你的想法,让智能体团队为你规划、构建并发布一个可运行的网页应用。Atoms 笔试 Demo。",
+  title: "Atoms — 智能体驱动的应用生成平台",
+  description: "描述你的想法,让智能体团队为你规划、构建并发布一个可运行的网页或移动应用。",
 };
 
 export default function RootLayout({

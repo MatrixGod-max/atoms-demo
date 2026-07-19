@@ -1,10 +1,8 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { getUser } from "@/lib/auth";
-import PromptLauncher from "@/components/PromptLauncher";
+import PromptCard from "@/components/PromptCard";
 import ProjectCard, { type ProjectSummary } from "@/components/ProjectCard";
-import LogoutButton from "@/components/LogoutButton";
 
 export const dynamic = "force-dynamic";
 
@@ -23,20 +21,10 @@ export default async function Dashboard() {
 
   return (
     <div className="flex-1 flex flex-col">
-      <nav className="flex items-center justify-between px-6 py-4 max-w-6xl w-full mx-auto">
-        <Link href="/" className="flex items-center gap-2 font-semibold tracking-wide">
-          <span className="text-accent text-xl">⚛</span> Quark
-        </Link>
-        <div className="flex items-center gap-3 text-sm text-muted">
-          <span>{user.name}</span>
-          <LogoutButton />
-        </div>
-      </nav>
-
-      <main className="flex-1 max-w-6xl w-full mx-auto px-6 pb-16">
-        <section className="max-w-2xl mx-auto mt-8 mb-12">
-          <h1 className="font-semibold text-xl mb-4 text-center">今天想构建什么?</h1>
-          <PromptLauncher loggedIn compact />
+      <main className="flex-1 max-w-5xl w-full mx-auto px-6 pb-16">
+        <section className="max-w-2xl mx-auto mt-10 mb-12">
+          <h1 className="font-serif-display font-bold text-2xl mb-5 text-center">今天想构建什么?</h1>
+          <PromptCard loggedIn compact />
         </section>
 
         <section>

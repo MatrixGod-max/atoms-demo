@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { THEME_PRESETS } from "@/lib/launch";
 
 interface Message {
   id: string;
@@ -60,8 +61,6 @@ interface AttachmentMeta {
   size: number;
 }
 
-const THEME_PRESETS = ["深色", "浅色", "多巴胺", "莫兰迪", "像素复古", "极简黑白", "毛玻璃"];
-
 interface Spec {
   name: string;
   summary: string;
@@ -80,13 +79,19 @@ const STAGE_LABELS: Record<StageName, string> = {
   validator: "Validator · 实测",
 };
 
-const IDLE_STAGES: Record<StageName, { state: StageState; info?: string }> = {
+const IDLE_STAGES: Record<StageName, { state: StageState; info?: string; model?: string }> = {
   researcher: { state: "idle" },
   planner: { state: "idle" },
   engineer: { state: "idle" },
   reviewer: { state: "idle" },
   validator: { state: "idle" },
 };
+
+const GEN_MODES = [
+  ["fast", "⚡ 快速", "全阶段 DeepSeek V3:最快,日常迭代首选"],
+  ["mixed", "🧠 混合", "R1 负责研究/规划/评审(想得深),V3 负责编码(写得快)"],
+  ["deep", "🐢 深度", "全阶段 R1:最强推理,速度最慢"],
+] as const;
 
 const MAX_RECONNECTS = 5;
 
@@ -95,7 +100,7 @@ export default function Builder({ projectId }: { projectId: string }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [generating, setGenerating] = useState(false);
-  const [stages, setStages] = useState<Record<StageName, { state: StageState; info?: string }>>(IDLE_STAGES);
+  const [stages, setStages] = useState<Record<StageName, { state: StageState; info?: string; model?: string }>>(IDLE_STAGES);
   const [spec, setSpec] = useState<Spec | null>(null);
   const [streamCode, setStreamCode] = useState("");
   const [html, setHtml] = useState<string | null>(null);
@@ -109,6 +114,8 @@ export default function Builder({ projectId }: { projectId: string }) {
   const [nameDraft, setNameDraft] = useState("");
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
   const [research, setResearch] = useState(false);
+  const [genMode, setGenMode] = useState<"fast" | "mixed" | "deep">("fast");
+  const [previewReady, setPreviewReady] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
   const [deployOpen, setDeployOpen] = useState(false);
   const [deployBusy, setDeployBusy] = useState("");
@@ -194,6 +201,7 @@ export default function Builder({ projectId }: { projectId: string }) {
                 [event.stage as StageName]: {
                   state: event.status === "start" ? "active" : "done",
                   info: event.info,
+                  model: event.model ?? s[event.stage as StageName]?.model,
                 },
               }));
               break;
@@ -255,7 +263,10 @@ export default function Builder({ projectId }: { projectId: string }) {
           }
         }
         const data = await load();
-        if (data?.currentHtml) setTab("preview");
+        if (data?.currentHtml) {
+          setTab("preview");
+          setPreviewReady(true);
+        }
       } catch (err) {
         pushError(`生成失败:${err instanceof Error ? err.message : "网络错误"}`);
       } finally {
@@ -268,7 +279,7 @@ export default function Builder({ projectId }: { projectId: string }) {
   );
 
   const generate = useCallback(
-    async (prompt: string) => {
+    async (prompt: string, researchOverride?: boolean) => {
       setGenerating(true);
       resetRunState();
       setMessages((m) => [...m, { id: `tmp_${Date.now()}`, role: "user", content: prompt }]);
@@ -276,7 +287,7 @@ export default function Builder({ projectId }: { projectId: string }) {
         const res = await fetch(`/api/projects/${projectId}/generate`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ prompt, research }),
+          body: JSON.stringify({ prompt, research: researchOverride ?? research, mode: genMode }),
         });
         const data = await res.json().catch(() => ({}));
         if (res.status === 401) {
@@ -295,7 +306,7 @@ export default function Builder({ projectId }: { projectId: string }) {
         setGenerating(false);
       }
     },
-    [projectId, research, attachJob, resetRunState, pushError]
+    [projectId, research, genMode, attachJob, resetRunState, pushError]
   );
 
   // Initial load: reconnect to a live job if one exists, else auto-start a freshly created project.
@@ -312,7 +323,20 @@ export default function Builder({ projectId }: { projectId: string }) {
       const pending = sessionStorage.getItem(`quark_pending_${projectId}`);
       if (pending && data.versions.length === 0) {
         sessionStorage.removeItem(`quark_pending_${projectId}`);
-        generate(pending);
+        // New launches store JSON {prompt, research}; legacy values are the plain prompt string.
+        let bootPrompt = pending;
+        let bootResearch = false;
+        try {
+          const parsed = JSON.parse(pending);
+          if (parsed && typeof parsed.prompt === "string") {
+            bootPrompt = parsed.prompt;
+            bootResearch = !!parsed.research;
+          }
+        } catch {
+          // legacy plain-string pending value
+        }
+        if (bootResearch) setResearch(true);
+        generate(bootPrompt, bootResearch);
       }
     })();
   }, [load, generate, attachJob, resetRunState, projectId]);
@@ -729,6 +753,11 @@ export default function Builder({ projectId }: { projectId: string }) {
                       />
                       <span className={`text-xs font-mono ${stages[name].state === "idle" ? "text-muted" : "text-ink"}`}>
                         {STAGE_LABELS[name]}
+                        {stages[name].model && (
+                          <span className="ml-1.5 px-1 py-0.5 rounded bg-accent-soft text-accent text-[10px]">
+                            {stages[name].model}
+                          </span>
+                        )}
                       </span>
                       {stages[name].info && (
                         <span className="text-[11px] text-muted truncate flex-1">{stages[name].info}</span>
@@ -770,6 +799,19 @@ export default function Builder({ projectId }: { projectId: string }) {
               >
                 🔬 深度研究{research ? " ✓" : ""}
               </button>
+              <div className="flex items-center rounded-lg border border-line overflow-hidden text-[11px]">
+                {GEN_MODES.map(([m, label, desc]) => (
+                  <button
+                    key={m}
+                    className={`px-2 py-1 transition-colors ${genMode === m ? "bg-accent-soft text-ink" : "text-muted hover:text-ink"}`}
+                    onClick={() => setGenMode(m)}
+                    disabled={generating}
+                    title={desc}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
               {attachments.map((a) => (
                 <span key={a.id} className="spec-chip px-2 py-1 text-[11px] flex items-center gap-1.5">
                   {a.kind === "image" ? "🖼" : "📄"} {a.filename}
@@ -813,11 +855,25 @@ export default function Builder({ projectId }: { projectId: string }) {
               <button
                 key={t}
                 className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${tab === t ? "bg-accent-soft text-ink" : "text-muted hover:text-ink"}`}
-                onClick={() => setTab(t)}
+                onClick={() => {
+                  setTab(t);
+                  if (t === "preview") setPreviewReady(false);
+                }}
               >
                 {t === "preview" ? "预览" : "代码"}
               </button>
             ))}
+            {previewReady && tab === "code" && !generating && (
+              <button
+                className="px-3 py-1.5 text-xs rounded-lg text-good border border-good/40"
+                onClick={() => {
+                  setTab("preview");
+                  setPreviewReady(false);
+                }}
+              >
+                ✓ 新版本已生成 → 查看预览
+              </button>
+            )}
             {generating && (
               <span className="ml-auto font-mono text-[11px] text-amber animate-pulse">
                 ● {streamCode ? `${streamCode.length} 字符` : "思考中"}
@@ -878,10 +934,16 @@ export default function Builder({ projectId }: { projectId: string }) {
           <button
             key={pane}
             className={`flex-1 py-2.5 text-sm ${mobilePane === pane ? "text-accent font-semibold" : "text-muted"}`}
-            onClick={() => setMobilePane(pane)}
+            onClick={() => {
+              setMobilePane(pane);
+              if (pane === "app") setPreviewReady(false);
+            }}
           >
             {label}
             {pane === "app" && generating && <span className="text-amber ml-1 animate-pulse">●</span>}
+            {pane === "app" && !generating && previewReady && mobilePane === "chat" && (
+              <span className="text-good ml-1 animate-pulse">●</span>
+            )}
           </button>
         ))}
       </nav>
