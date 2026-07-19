@@ -56,6 +56,27 @@ function createDb(): DatabaseSync {
       created_at   INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS jobs (
+      id         TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      prompt     TEXT NOT NULL,
+      status     TEXT NOT NULL CHECK (status IN ('queued','running','done','error')),
+      stage      TEXT,
+      error      TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS app_kv (
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      k          TEXT NOT NULL,
+      v          TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (project_id, k)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_jobs_project ON jobs(project_id, status);
     CREATE INDEX IF NOT EXISTS idx_messages_project ON messages(project_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_versions_project ON app_versions(project_id, num);
     CREATE INDEX IF NOT EXISTS idx_projects_user ON projects(user_id, updated_at);

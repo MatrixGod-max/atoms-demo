@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { createSession, verifyPassword } from "@/lib/auth";
+import { clientIp, rateLimit } from "@/lib/ratelimit";
 
 export async function POST(req: Request) {
+  const rl = rateLimit(`auth:${clientIp(req)}`, 10, 60_000);
+  if (!rl.ok) {
+    return NextResponse.json({ error: `尝试过于频繁,请 ${rl.retryAfterSec} 秒后再试` }, { status: 429 });
+  }
   const { email, password } = await req.json().catch(() => ({}));
   if (typeof email !== "string" || typeof password !== "string") {
     return NextResponse.json({ error: "请输入邮箱和密码" }, { status: 400 });

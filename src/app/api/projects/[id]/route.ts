@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getUser } from "@/lib/auth";
 import { ownedProject } from "@/lib/projects";
+import { jobRunner } from "@/lib/jobs";
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const user = await getUser();
@@ -22,7 +23,14 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
         | undefined)
     : undefined;
 
-  return NextResponse.json({ project, messages, versions, currentHtml: current?.html ?? null });
+  const active = jobRunner.activeJobForProject(id);
+  return NextResponse.json({
+    project,
+    messages,
+    versions,
+    currentHtml: current?.html ?? null,
+    activeJob: active ? { id: active.id, status: active.status, stage: active.stage } : null,
+  });
 }
 
 export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {

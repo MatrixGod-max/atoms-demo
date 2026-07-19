@@ -46,3 +46,6 @@ data/
 *.db-journal
 *.db-wal
 *.db-shm
+
+# tests
+.test-data/

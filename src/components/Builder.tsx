@@ -29,6 +29,7 @@ interface ProjectDetail {
   messages: Message[];
   versions: Version[];
   currentHtml: string | null;
+  activeJob: { id: string; status: string; stage: string | null } | null;
 }
 
 interface Spec {
@@ -38,13 +39,21 @@ interface Spec {
   design: string;
 }
 
-type StageName = "planner" | "engineer" | "reviewer";
+type StageName = "planner" | "engineer" | "reviewer" | "validator";
 type StageState = "idle" | "active" | "done";
 
 const STAGE_LABELS: Record<StageName, string> = {
   planner: "Planner · 规划",
   engineer: "Engineer · 构建",
   reviewer: "Reviewer · 评审",
+  validator: "Validator · 实测",
+};
+
+const IDLE_STAGES: Record<StageName, { state: StageState; info?: string }> = {
+  planner: { state: "idle" },
+  engineer: { state: "idle" },
+  reviewer: { state: "idle" },
+  validator: { state: "idle" },
 };
 
 export default function Builder({ projectId }: { projectId: string }) {
@@ -52,17 +61,14 @@ export default function Builder({ projectId }: { projectId: string }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [generating, setGenerating] = useState(false);
-  const [stages, setStages] = useState<Record<StageName, { state: StageState; info?: string }>>({
-    planner: { state: "idle" },
-    engineer: { state: "idle" },
-    reviewer: { state: "idle" },
-  });
+  const [stages, setStages] = useState<Record<StageName, { state: StageState; info?: string }>>(IDLE_STAGES);
   const [spec, setSpec] = useState<Spec | null>(null);
   const [streamCode, setStreamCode] = useState("");
   const [html, setHtml] = useState<string | null>(null);
   const [tab, setTab] = useState<"preview" | "code">("preview");
   const [publishBusy, setPublishBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [queuePos, setQueuePos] = useState(0);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const codeRef = useRef<HTMLPreElement>(null);
@@ -78,21 +84,20 @@ export default function Builder({ projectId }: { projectId: string }) {
     return data;
   }, [projectId]);
 
-  const generate = useCallback(
-    async (prompt: string) => {
-      setGenerating(true);
-      setSpec(null);
-      setStreamCode("");
-      setTab("code");
-      setStages({ planner: { state: "idle" }, engineer: { state: "idle" }, reviewer: { state: "idle" } });
-      setMessages((m) => [...m, { id: `tmp_${Date.now()}`, role: "user", content: prompt }]);
+  const resetRunState = useCallback(() => {
+    setSpec(null);
+    setStreamCode("");
+    setQueuePos(0);
+    setTab("code");
+    setStages(IDLE_STAGES);
+  }, []);
 
+  /** Attach to a job's SSE stream (fresh start or reconnect); replay is transparent. */
+  const attachJob = useCallback(
+    async (jobId: string) => {
+      setGenerating(true);
       try {
-        const res = await fetch(`/api/projects/${projectId}/generate`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ prompt }),
-        });
+        const res = await fetch(`/api/jobs/${jobId}/stream`);
         if (!res.ok || !res.body) {
           const data = await res.json().catch(() => ({}));
           throw new Error(data.error || `请求失败 (${res.status})`);
@@ -113,6 +118,12 @@ export default function Builder({ projectId }: { projectId: string }) {
             if (payload === "[DONE]") continue;
             const event = JSON.parse(payload);
             switch (event.type) {
+              case "queued":
+                setQueuePos(event.position);
+                break;
+              case "job_state":
+                if (event.status === "running") setQueuePos(0);
+                break;
               case "stage":
                 setStages((s) => ({
                   ...s,
@@ -153,24 +164,61 @@ export default function Builder({ projectId }: { projectId: string }) {
         ]);
       } finally {
         setGenerating(false);
+        setQueuePos(0);
       }
     },
-    [projectId, load]
+    [load]
   );
 
-  // Initial load + auto-start for a freshly created project.
+  const generate = useCallback(
+    async (prompt: string) => {
+      setGenerating(true);
+      resetRunState();
+      setMessages((m) => [...m, { id: `tmp_${Date.now()}`, role: "user", content: prompt }]);
+      try {
+        const res = await fetch(`/api/projects/${projectId}/generate`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ prompt }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 409 && data.jobId) {
+          await attachJob(data.jobId);
+          return;
+        }
+        if (!res.ok) throw new Error(data.error || `请求失败 (${res.status})`);
+        if (data.position > 0) setQueuePos(data.position);
+        await attachJob(data.jobId);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "网络错误";
+        setMessages((m) => [
+          ...m,
+          { id: `tmp_e_${Date.now()}`, role: "agent", content: `生成失败:${message}`, meta: "error" },
+        ]);
+        setGenerating(false);
+      }
+    },
+    [projectId, attachJob, resetRunState]
+  );
+
+  // Initial load: reconnect to a live job if one exists, else auto-start a freshly created project.
   useEffect(() => {
     (async () => {
       const data = await load();
       if (bootedRef.current || !data) return;
       bootedRef.current = true;
+      if (data.activeJob) {
+        resetRunState();
+        attachJob(data.activeJob.id);
+        return;
+      }
       const pending = sessionStorage.getItem(`quark_pending_${projectId}`);
       if (pending && data.versions.length === 0) {
         sessionStorage.removeItem(`quark_pending_${projectId}`);
         generate(pending);
       }
     })();
-  }, [load, generate, projectId]);
+  }, [load, generate, attachJob, resetRunState, projectId]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -216,7 +264,13 @@ export default function Builder({ projectId }: { projectId: string }) {
   const project = detail?.project;
   const versions = detail?.versions ?? [];
   const currentNum = versions.find((v) => v.id === project?.current_version_id)?.num;
-  const publishedUrl = project?.published_version_id && project.slug ? `/p/${project.slug}` : null;
+  const appsOrigin = process.env.NEXT_PUBLIC_APPS_ORIGIN;
+  const publishedUrl =
+    project?.published_version_id && project.slug
+      ? appsOrigin
+        ? `${appsOrigin}/${project.slug}`
+        : `/p/${project.slug}`
+      : null;
   const publishOutdated =
     !!publishedUrl && project?.published_version_id !== project?.current_version_id;
 
@@ -246,13 +300,15 @@ export default function Builder({ projectId }: { projectId: string }) {
           <button
             className="btn-ghost px-3 py-1.5 text-xs font-mono text-good"
             onClick={() => {
-              navigator.clipboard.writeText(`${location.origin}${publishedUrl}`);
+              navigator.clipboard.writeText(
+                publishedUrl.startsWith("http") ? publishedUrl : `${location.origin}${publishedUrl}`
+              );
               setCopied(true);
               setTimeout(() => setCopied(false), 1500);
             }}
             title="复制公开链接"
           >
-            {copied ? "已复制 ✓" : `⚛ ${publishedUrl}`}
+            {copied ? "已复制 ✓" : `⚛ ${publishedUrl.replace(/^https?:\/\//, "")}`}
           </button>
         )}
         <button
@@ -297,7 +353,10 @@ export default function Builder({ projectId }: { projectId: string }) {
 
             {generating && (
               <div className="card p-4 self-stretch">
-                <p className="font-mono text-[10px] tracking-widest text-muted mb-3">AGENT PIPELINE</p>
+                <p className="font-mono text-[10px] tracking-widest text-muted mb-3">
+                  AGENT PIPELINE
+                  {queuePos > 0 && <span className="text-amber ml-2">排队中 · 第 {queuePos} 位</span>}
+                </p>
                 <div className="flex flex-col gap-3">
                   {(Object.keys(STAGE_LABELS) as StageName[]).map((name) => (
                     <div key={name} className="flex items-center gap-3">
@@ -360,12 +419,17 @@ export default function Builder({ projectId }: { projectId: string }) {
           <div className="flex-1 min-h-0 bg-bg-deep">
             {tab === "preview" ? (
               html ? (
-                <iframe
-                  className="w-full h-full bg-white"
-                  sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups"
-                  srcDoc={html}
-                  title="应用预览"
-                />
+                <div className="h-full flex flex-col">
+                  <p className="px-3 py-1 text-[11px] text-muted border-b border-line shrink-0">
+                    沙箱预览 · 预览中数据不持久,发布后云存储生效
+                  </p>
+                  <iframe
+                    className="w-full flex-1 bg-white"
+                    sandbox="allow-scripts allow-forms allow-modals allow-popups"
+                    srcDoc={html}
+                    title="应用预览"
+                  />
+                </div>
               ) : (
                 <div className="h-full flex flex-col items-center justify-center text-muted text-sm gap-2">
                   <span className="text-3xl">⚛</span>

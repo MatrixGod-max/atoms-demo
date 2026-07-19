@@ -8,8 +8,10 @@ const MODEL = process.env.DEEPSEEK_MODEL || "deepseek-chat";
 
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
+import { validateHtml } from "./validate";
+
 export type AgentEvent =
-  | { type: "stage"; stage: "planner" | "engineer" | "reviewer"; status: "start" | "done"; info?: string }
+  | { type: "stage"; stage: "planner" | "engineer" | "reviewer" | "validator"; status: "start" | "done"; info?: string }
   | { type: "plan"; spec: AppSpec }
   | { type: "code_delta"; delta: string }
   | { type: "code_reset" }
@@ -78,7 +80,7 @@ async function* chatStream(
   }
 }
 
-function stripFences(text: string): string {
+export function stripFences(text: string): string {
   let t = text.trim();
   if (t.startsWith("```")) {
     t = t.replace(/^```[a-zA-Z]*\n/, "");
@@ -87,7 +89,7 @@ function stripFences(text: string): string {
   return t.trim();
 }
 
-function extractJson(text: string): string {
+export function extractJson(text: string): string {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start === -1 || end === -1) throw new Error("planner returned no JSON");
@@ -98,7 +100,7 @@ const ENGINEER_RULES = `输出规则(必须严格遵守):
 1. 只输出一个完整的、自包含的 HTML 文件,从 <!DOCTYPE html> 开始。不要输出任何 markdown 代码围栏或解释文字。
 2. 所有 CSS 和 JavaScript 必须内联在该文件中,禁止引用任何外部资源(CDN、字体、图片 URL 等),图标可用 emoji 或内联 SVG。
 3. 应用必须具备真实交互(增删改查、状态变化等),不能是静态展示页。
-4. 需要持久化的数据用 localStorage,并使用应用专属的 key 前缀避免冲突;所有 localStorage 访问包在 try/catch 中。
+4. 数据持久化:优先使用平台注入的 \`window.quark.storage\`(async get(key)/set(key,value),字符串值,发布后所有访客共享)——用法:\`if(window.quark&&window.quark.storage){...}\`;不可用时回退 localStorage。两种访问都必须包在 try/catch 中,存取失败时应用仍要能正常使用(内存态)。
 5. 视觉设计要现代、精致:合理的间距与层级、和谐配色、hover/过渡效果、移动端可用(响应式)。
 6. 代码健壮:处理空状态(无数据时的引导提示)、非法输入,不允许出现未捕获异常。
 7. 界面语言与用户需求的语言一致。`;
@@ -110,7 +112,70 @@ export interface PipelineInput {
   specJson: string | null;
 }
 
+/** Deterministic, LLM-free pipeline for tests/CI (AGENT_MOCK=1). */
+async function* runMockPipeline(input: PipelineInput): AsyncGenerator<AgentEvent> {
+  const isIteration = !!input.currentHtml;
+  const broken = input.request.includes("MOCK_BROKEN");
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  if (!isIteration) {
+    yield { type: "stage", stage: "planner", status: "start" };
+    await sleep(50);
+    const spec: AppSpec = {
+      name: "Mock 计数器",
+      summary: "用于测试的最小计数应用",
+      features: ["点击 +1", "数据持久化"],
+      design: "极简",
+    };
+    yield { type: "plan", spec };
+    yield { type: "stage", stage: "planner", status: "done", info: spec.name };
+  }
+  yield { type: "stage", stage: "engineer", status: "start" };
+  let html = `<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mock 计数器</title>
+<style>body{font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:16px}button{font-size:20px;padding:8px 24px}</style>
+</head><body><h1 id="n">0</h1><button id="b">+1</button>
+${broken ? "<script>throw new Error('mock runtime failure')<\/script>" : ""}
+<script>
+(async function(){
+  var n=0;
+  async function load(){try{if(window.quark&&window.quark.storage){var v=await window.quark.storage.get('count');if(v!=null)n=parseInt(v,10)||0;}else{n=parseInt(localStorage.getItem('mock_count')||'0',10)||0;}}catch(e){}}
+  async function save(){try{if(window.quark&&window.quark.storage){await window.quark.storage.set('count',String(n));}else{localStorage.setItem('mock_count',String(n));}}catch(e){}}
+  await load();
+  document.getElementById('n').textContent=n;
+  document.getElementById('b').onclick=async function(){n++;document.getElementById('n').textContent=n;await save();};
+})();
+<\/script></body></html>`;
+  for (let i = 0; i < html.length; i += 200) {
+    await sleep(20);
+    yield { type: "code_delta", delta: html.slice(i, i + 200) };
+  }
+  yield { type: "stage", stage: "engineer", status: "done", info: `${html.length} 字符` };
+  yield { type: "stage", stage: "reviewer", status: "start" };
+  await sleep(50);
+  yield { type: "stage", stage: "reviewer", status: "done", info: "mock 评审通过" };
+
+  yield { type: "stage", stage: "validator", status: "start" };
+  let validatorNotes = "运行通过,无报错";
+  const v1 = await validateHtml(html);
+  if (v1.skipped) {
+    validatorNotes = "校验环境不可用,跳过";
+  } else if (!v1.ok) {
+    html = html.replace(/<script>throw[^<]*<\/script>/, "");
+    yield { type: "code_reset" };
+    yield { type: "code_delta", delta: html };
+    const v2 = await validateHtml(html);
+    validatorNotes = `捕获 ${v1.errors.length} 个运行时错误并修复(复验${v2.ok ? "通过" : "未过"})`;
+  }
+  yield { type: "stage", stage: "validator", status: "done", info: validatorNotes };
+  yield { type: "html", html, reviewNotes: `mock 评审通过;${validatorNotes}` };
+  yield { type: "agent_message", content: isIteration ? "mock 迭代完成" : "「Mock 计数器」已生成" };
+}
+
 export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEvent> {
+  if (process.env.AGENT_MOCK === "1") {
+    yield* runMockPipeline(input);
+    return;
+  }
   const isIteration = !!input.currentHtml;
   let spec: AppSpec | null = input.specJson ? (JSON.parse(input.specJson) as AppSpec) : null;
 
@@ -203,6 +268,48 @@ export async function* runPipeline(input: PipelineInput): AsyncGenerator<AgentEv
     reviewNotes = "评审阶段跳过(不影响产物)";
   }
   yield { type: "stage", stage: "reviewer", status: "done", info: reviewNotes };
+
+  // ---- Stage 4: Validator (runtime check in headless Chrome, one repair round) ----
+  yield { type: "stage", stage: "validator", status: "start" };
+  let validatorNotes: string;
+  const v1 = await validateHtml(html);
+  if (v1.skipped) {
+    validatorNotes = "校验环境不可用,跳过";
+  } else if (v1.ok) {
+    validatorNotes = "运行通过,无报错";
+  } else {
+    let fixed = "";
+    yield { type: "code_reset" };
+    for await (const delta of chatStream([
+      { role: "system", content: `你是 Quark 平台的工程师智能体(Engineer)。\n${ENGINEER_RULES}` },
+      {
+        role: "user",
+        content: `以下单文件应用在真实浏览器中运行时出现了错误。\n\n运行时错误:\n${v1.errors
+          .map((e) => `- ${e}`)
+          .join("\n")}\n\n当前代码:\n\n${html}\n\n请修复这些运行时错误,保持功能与视觉不变,输出修复后的完整 HTML 文件。`,
+      },
+    ])) {
+      fixed += delta;
+      yield { type: "code_delta", delta };
+    }
+    fixed = stripFences(fixed);
+    if (/^<!DOCTYPE html>/i.test(fixed) && fixed.length > 500) {
+      const v2 = await validateHtml(fixed);
+      if (v2.skipped || v2.ok) {
+        html = fixed;
+        validatorNotes = `捕获 ${v1.errors.length} 个运行时错误并修复,复验通过`;
+      } else if (v2.errors.length < v1.errors.length) {
+        html = fixed;
+        validatorNotes = `修复后错误从 ${v1.errors.length} 降至 ${v2.errors.length}`;
+      } else {
+        validatorNotes = `修复未生效,保留原产物(${v1.errors.length} 个运行时错误)`;
+      }
+    } else {
+      validatorNotes = "修复产出无效,保留原产物";
+    }
+  }
+  yield { type: "stage", stage: "validator", status: "done", info: validatorNotes };
+  reviewNotes = reviewNotes ? `${reviewNotes};${validatorNotes}` : validatorNotes;
 
   yield { type: "html", html, reviewNotes };
   yield {

@@ -6,17 +6,22 @@
 
 ```
 Internet :443
-  → edge-nginx (docker, host net, SNI 分流: quark.lexarcai.com → 127.0.0.1:4443)
+  → edge-nginx (docker, host net, SNI 分流: quark.lexarcai.com / quark-apps.lexarcai.com → 127.0.0.1:4443)
   → edge-caddy (docker, TLS 终结 + 反代, Let's Encrypt 自动续期)
-  → quark.service (systemd, next start --port 8090)
+  → quark.service (systemd, next start --port 8090, MemoryMax=1536M — validator 的 Chrome 开销)
   → SQLite: /home/ubuntu/projects/atoms-demo/data/quark.db (WAL)
 ```
 
-- DNS:Route53 zone `lexarcai.com`(Z06701912Y6GOG19VIYI4),A 记录 `quark` → 52.8.191.27
+- 双域名同进程,`src/proxy.ts` 按 Host 分流:
+  - `quark.lexarcai.com` — 平台(登录/工作台);`/p/*` 301 到 apps 域
+  - `quark-apps.lexarcai.com` — 已发布应用 + 其 KV API(与平台 cookie/origin 隔离)
+- DNS:Route53 zone `lexarcai.com`(Z06701912Y6GOG19VIYI4),A 记录 `quark`、`quark-apps` → 52.8.191.27
 - 边缘配置:`~/edge-proxy/nginx.conf`(SNI map)与 `~/edge-proxy/Caddyfile`(vhost)
   - **注意**:两者都是单文件 bind mount,编辑后必须 `docker restart edge-caddy edge-nginx`
     (容器内 reload 读到的是旧 inode)
-- 秘钥:`/home/ubuntu/projects/atoms-demo/.env`(`DEEPSEEK_API_KEY`,0600,不入 git)
+- 环境:`.env`(`DEEPSEEK_API_KEY`,0600,不入 git);`.env.production`
+  (`NEXT_PUBLIC_APPS_ORIGIN` / `APPS_HOST` / `APPS_REDIRECT=1`,不入 git)
+- 备份:ubuntu crontab 03:30 `sqlite3 .backup` → `~/backups/quark/`,保留 14 份
 
 ## 常用操作
 
@@ -30,7 +35,12 @@ cd ~/projects/atoms-demo && git pull && npm install && npm run build \
   && sudo systemctl restart quark
 
 # 健康检查
-curl -fsS -o /dev/null -w '%{http_code}\n' https://quark.lexarcai.com/
+curl -fsS https://quark.lexarcai.com/api/health
+
+# 测试(单测 + mock 全链路冒烟)
+npm test
+AGENT_MOCK=1 npm run dev -- --port 3456 &   # 然后:
+BASE_URL=http://localhost:3456 bash scripts/smoke.sh
 
 # 备份数据库(WAL 安全快照)
 sqlite3 ~/projects/atoms-demo/data/quark.db ".backup '/home/ubuntu/backups/quark-$(date +%F).db'"

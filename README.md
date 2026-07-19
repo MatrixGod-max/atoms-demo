@@ -27,51 +27,61 @@
 | Next.js 单体全栈 + SQLite(`node:sqlite`) | 一个进程覆盖 UI/API/静态服务;Node 24 内置 SQLite,零 ORM、零原生依赖,部署面最小。规模上去后再谈拆分 |
 | 自研轻量 Auth(scrypt + httpOnly cookie) | 演示规模下引入 NextAuth/Clerk 属于过度设计;`node:crypto` 的 scrypt + 会话表 40 行解决 |
 | LLM 用 DeepSeek(OpenAI 兼容) | 代码生成质量/价格比合适;客户端只依赖 `fetch`,换任何 OpenAI 兼容模型只改两个环境变量 |
-| 生成应用的数据存 localStorage | 生成物的持久化下放给浏览器,平台侧持久化(项目/版本/会话)已由 SQLite 保证;代价是换设备不同步,见"继续投入" |
+| 生成应用的数据:云 KV 优先,localStorage 兜底 | v2 注入 `window.quark.storage`(服务端 KV,访客共享)对标 Atoms Cloud;注入发生在发布服务侧而非生成物内,版本数据保持纯净 |
+| 发布应用独立源 + 无鉴权公共 KV | 用户生成代码是不可信输入,必须与平台 cookie/origin 隔离;KV 公共写是"多人共享小应用"的产品选择,以容量/键数/限流约束风险 |
 
 ## 当前完成程度
 
-已完成:
+v1(6-8h 笔试窗口内):
 
 - [x] 注册 / 登录 / 会话(scrypt 哈希,httpOnly cookie)
 - [x] 项目 Dashboard(列表 / 新建 / 删除)
 - [x] Planner → Engineer → Reviewer 流水线,SSE 流式输出(阶段时间线 + 代码实况)
-- [x] 沙箱 iframe 实时预览,预览/代码双视图
-- [x] 对话式迭代(基于当前版本增量修改)
-- [x] 版本历史、任意版本回滚
-- [x] 一键发布 / 更新发布,公开访问页 `/p/{slug}`
-- [x] 生产部署(systemd + Caddy 自动 HTTPS),线上全链路验证通过
+- [x] 沙箱 iframe 实时预览,预览/代码双视图;对话式迭代;版本历史与回滚
+- [x] 一键发布 / 更新发布;生产部署(systemd + Caddy 自动 HTTPS)
 
-已知局限(有意为之的范围控制):
+v2(生产化改造,对应下方原扩展优先级 1-3 全部落地):
+
+- [x] **生成作业化**:任务落库 + 进程内队列(并发上限 2),SSE 断线重连自动续传(缓冲重放),刷新页面不丢进度;服务重启的中断任务落为明确失败态
+- [x] **Validator 阶段**:headless Chrome 真实加载产物,捕获运行时异常/console.error,失败自动回炉一轮修复并复验
+- [x] **应用云存储**(对标 Atoms Cloud):发布应用注入 `window.quark.storage`(服务端 KV,全部访客共享,8KB/值、64 键/应用),换设备数据仍在;不可用时自动降级 localStorage
+- [x] **安全**:发布应用迁移到独立源 `quark-apps.lexarcai.com`(与平台 cookie/origin 隔离);预览 iframe 去除 `allow-same-origin`;登录/注册限流 10 次/分/IP;生成限流 3 次/10 分 + 24h 配额 30 次/用户;变更类 API Origin 校验
+- [x] **可运维**:`/api/health`、SQLite 每日备份(保留 14 份)、vitest 单测+集成(11 例)、mock 流水线(`AGENT_MOCK=1`)、e2e 冒烟脚本、GitHub Actions CI
+
+剩余已知局限:
 
 - 生成产物限单文件 HTML,不支持多文件项目与外部依赖
-- Reviewer 是单轮静态评审,没有真实运行时校验(如 headless 浏览器冒烟)
-- 生成中断(刷新页面)后任务不续传,但已入库消息与版本不丢
-- 未做邮箱验证、找回密码、速率限制等生产级账号能力
+- 队列在进程内(单机部署),横向扩展需外置队列与共享事件流
+- 未做邮箱验证/找回密码(SES 尚在沙箱);KV 为公共写(按应用隔离 + 限流 + 容量上限)
 
 ## 如果继续投入,如何扩展(按优先级)
 
-1. **生成可靠性**:Reviewer 升级为 headless 浏览器实测(加载 + 控制台报错 + 关键交互脚本),失败自动回炉 —— 这是"可用率"的最大杠杆;
-2. **任务队列与断线续传**:生成任务落库 + 后台 worker,前端断线重连拉取进度,支持并发生成;
-3. **应用云存储**:给每个发布应用注入极小的 KV API(`quark.storage.get/set`),把生成应用的数据从 localStorage 升级为服务端持久化(对标 Atoms Cloud);
-4. **多文件产物与依赖白名单**:引入 esbuild 服务端打包,支持 React/组件级生成;
-5. **Race Mode**:同一 prompt 并发多模型生成,并排预览择优(对标 Atoms Race Mode)。
+1. **多文件产物与依赖白名单**:esbuild 服务端打包,支持 React/组件级生成;
+2. **Race Mode**:同一 prompt 并发多模型生成,并排预览择优(对标 Atoms Race Mode);
+3. **Validator 深化**:关键交互脚本自动生成并执行(点击主按钮、断言状态变化),不止于加载无报错;
+4. **多进程/多机扩展**:队列外置(Redis/SQLite WAL 轮询),SSE 事件流走 pub/sub;
+5. **账号完善**:邮箱验证、找回密码、KV 写鉴权(应用级 token)。
 
 ## 技术栈与架构
 
 - Next.js 16(App Router)+ React 19 + TypeScript + Tailwind v4
 - Node 24 内置 `node:sqlite`(WAL),无 ORM;`node:crypto` scrypt 做口令哈希
-- DeepSeek API(OpenAI 兼容),服务端 `fetch` 直连,SSE 转发
-- 部署:systemd 托管 `next start`,Caddy 反代 + Let's Encrypt 自动证书
+- DeepSeek API(OpenAI 兼容),服务端 `fetch` 直连,SSE 转发;puppeteer-core + 系统 Chrome 做运行时校验
+- 部署:systemd 托管 `next start`,Caddy 反代 + Let's Encrypt 自动证书;双域名(平台 / 发布应用)同进程按 Host 分流
+- 测试:vitest(单测 + job 集成)+ mock 流水线 + bash e2e 冒烟;GitHub Actions CI
 
 ```
 src/
-  lib/          db.ts(schema)· auth.ts(会话)· agent.ts(三段流水线)· projects.ts
+  proxy.ts      按 Host 分流 apps 域 · /p/* 301 · 变更类 API Origin 校验
+  lib/          db.ts(schema)· auth.ts(会话)· agent.ts(四段流水线+mock)
+                jobs.ts(队列/缓冲重放)· validate.ts(headless Chrome)· ratelimit.ts
   app/
-    api/        auth/* · projects/*(CRUD · generate SSE · publish · rollback)
-    p/[slug]/   已发布应用的公开页(原样输出 HTML)
+    api/        auth/* · projects/*(CRUD · generate→job · publish · rollback)
+                jobs/[id]/stream(SSE 重放+实时) · apps/[slug]/kv/[key] · health
+    p/[slug]/   已发布应用(注入 window.quark.storage 后原样输出)
     project/[id]  构建工作台(对话 + 智能体时间线 + 预览/代码)
     dashboard/  项目列表    login/ register/  landing
+tests/  scripts/smoke.sh  .github/workflows/ci.yml
 ```
 
 ## 本地运行

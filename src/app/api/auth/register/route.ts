@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
 import { db, now } from "@/lib/db";
 import { createSession, hashPassword, newId } from "@/lib/auth";
+import { clientIp, rateLimit } from "@/lib/ratelimit";
 
 export async function POST(req: Request) {
+  const rl = rateLimit(`auth:${clientIp(req)}`, 10, 60_000);
+  if (!rl.ok) {
+    return NextResponse.json({ error: `尝试过于频繁,请 ${rl.retryAfterSec} 秒后再试` }, { status: 429 });
+  }
   const { email, password, name } = await req.json().catch(() => ({}));
   if (typeof email !== "string" || !/^\S+@\S+\.\S+$/.test(email)) {
     return NextResponse.json({ error: "邮箱格式不正确" }, { status: 400 });
