@@ -1218,12 +1218,12 @@ export default function Builder({ projectId }: { projectId: string }) {
                       {project.domain_name ? (
                         <div className="flex items-center gap-2 mt-1.5">
                           <a
-                            href={`https://${project.domain_name}.quark-apps.lexarcai.com`}
+                            href={`https://${project.domain_name}.quark-apps.leapwiseai.com`}
                             target="_blank"
                             rel="noopener"
                             className="text-accent truncate hover:underline"
                           >
-                            {project.domain_name}.quark-apps.lexarcai.com
+                            {project.domain_name}.quark-apps.leapwiseai.com
                           </a>
                           <button
                             className="text-muted hover:text-bad ml-auto shrink-0"

@@ -37,7 +37,7 @@ if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded'
 /** Small dismissible badge on published apps: attribution + the Remix entry point. */
 function remixBadge(slug: string): string {
   const platform =
-    process.env.PLATFORM_ORIGIN || (process.env.NODE_ENV === "production" ? "https://quark.lexarcai.com" : "");
+    process.env.PLATFORM_ORIGIN || (process.env.NODE_ENV === "production" ? "https://quark.leapwiseai.com" : "");
   return `<script>(function(){function add(){var d=document.createElement('div');d.style.cssText='position:fixed;right:12px;bottom:12px;z-index:99999;display:flex;align-items:center;gap:6px;background:rgba(13,14,28,.92);color:#edebff;font:12px/1 -apple-system,sans-serif;padding:7px 10px;border-radius:99px;border:1px solid rgba(139,124,255,.35);box-shadow:0 2px 12px rgba(0,0,0,.25)';d.innerHTML='<a href="${platform}/remix/${slug}" target="_blank" rel="noopener" style="color:#edebff;text-decoration:none">\\u2600 \\u7528 Fusion \\u6784\\u5efa \\u00b7 <span style="color:#8b7cff">Remix</span></a><span style="cursor:pointer;color:#8d8aa8;padding:0 2px" aria-label="\\u5173\\u95ed">\\u00d7</span>';d.lastChild.onclick=function(){d.remove()};document.body.appendChild(d)}if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',add)}else{add()}})()</script>`;
 }
 
@@ -88,7 +88,7 @@ export function exportAppHtml(html: string, slug: string, opts: ServeOptions = {
   const apiBase =
     process.env.NEXT_PUBLIC_APPS_ORIGIN ||
     process.env.PLATFORM_ORIGIN ||
-    (process.env.NODE_ENV === "production" ? "https://quark-apps.lexarcai.com" : "http://localhost:3000");
+    (process.env.NODE_ENV === "production" ? "https://quark-apps.leapwiseai.com" : "http://localhost:3000");
   return buildAppHtml(html, slug, opts, apiBase);
 }
 

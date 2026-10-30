@@ -1,4 +1,4 @@
-export const APP_DOMAIN_SUFFIX = process.env.APPS_HOST || "quark-apps.lexarcai.com";
+export const APP_DOMAIN_SUFFIX = process.env.APPS_HOST || "quark-apps.leapwiseai.com";
 
 const RESERVED = new Set([
   "www", "api", "app", "apps", "admin", "root", "mail", "smtp", "ftp", "dev", "test", "staging",

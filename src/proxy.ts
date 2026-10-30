@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-const APPS_HOST = process.env.APPS_HOST || "quark-apps.lexarcai.com";
-const PLATFORM_ORIGIN = process.env.PLATFORM_ORIGIN || "https://quark.lexarcai.com";
+const APPS_HOST = process.env.APPS_HOST || "quark-apps.leapwiseai.com";
+const PLATFORM_ORIGIN = process.env.PLATFORM_ORIGIN || "https://quark.leapwiseai.com";
 const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 export function proxy(req: NextRequest) {
