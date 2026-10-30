@@ -15,7 +15,7 @@ Internet :443
 - 双域名同进程,`src/proxy.ts` 按 Host 分流:
   - `quark.leapwiseai.com` — 平台(登录/工作台);`/p/*` 301 到 apps 域
   - `quark-apps.leapwiseai.com` — 已发布应用 + 其 KV API(与平台 cookie/origin 隔离)
-- DNS:Route53 zone `lexarcai.com`(Z06701912Y6GOG19VIYI4),A 记录 `quark`、`quark-apps` → 52.8.191.27
+- DNS:Route53 zone `leapwiseai.com`(Z0406855MYM7V541MIRS),A 记录 `quark`、`quark-apps` → 52.8.191.27
 - 边缘配置:`~/edge-proxy/nginx.conf`(SNI map)与 `~/edge-proxy/Caddyfile`(vhost)
   - **注意**:两者都是单文件 bind mount,编辑后必须 `docker restart edge-caddy edge-nginx`
     (容器内 reload 读到的是旧 inode)

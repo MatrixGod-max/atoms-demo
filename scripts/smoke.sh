@@ -204,7 +204,7 @@ curl -fsS -b "$JAR" -X POST "$BASE_URL/api/projects/$NPROJ/publish" \
   -H 'content-type: application/json' -d '{"action":"publish"}' | grep -q '"ok":true' || fail "publish for domain"
 curl -fsS -b "$JAR" -X PATCH "$BASE_URL/api/projects/$NPROJ" \
   -H 'content-type: application/json' -d "{\"domainName\":\"$DNAME\"}" | grep -q '"ok":true' || fail "bind domain"
-DCODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/domains/check?domain=$DNAME.quark-apps.lexarcai.com")
+DCODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/domains/check?domain=$DNAME.quark-apps.leapwiseai.com")
 [ "$DCODE" = "200" ] || fail "domain check should 200, got $DCODE"
 curl -fsS "$BASE_URL/d/$DNAME" | grep -q "<!DOCTYPE html>" || fail "/d serving"
 RCODE=$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -X PATCH "$BASE_URL/api/projects/$NPROJ" \
@@ -212,7 +212,7 @@ RCODE=$(curl -s -o /dev/null -w '%{http_code}' -b "$JAR" -X PATCH "$BASE_URL/api
 [ "$RCODE" = "400" ] || fail "reserved domain should 400, got $RCODE"
 curl -fsS -b "$JAR" -X PATCH "$BASE_URL/api/projects/$NPROJ" \
   -H 'content-type: application/json' -d '{"domainName":null}' | grep -q '"ok":true' || fail "release domain"
-DCODE2=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/domains/check?domain=$DNAME.quark-apps.lexarcai.com")
+DCODE2=$(curl -s -o /dev/null -w '%{http_code}' "$BASE_URL/api/domains/check?domain=$DNAME.quark-apps.leapwiseai.com")
 [ "$DCODE2" = "404" ] || fail "released domain check should 404, got $DCODE2"
 
 step "v13: 指哪改哪 — target flows into the iteration"
