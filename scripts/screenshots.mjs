@@ -1,9 +1,9 @@
 // Regenerate README screenshots. Usage:
-//   BASE_URL=https://quark.lexarcai.com DEMO_EMAIL=demo@quark.dev DEMO_PASSWORD=... node scripts/screenshots.mjs
+//   BASE_URL=https://quark.leapwiseai.com DEMO_EMAIL=demo@quark.dev DEMO_PASSWORD=... node scripts/screenshots.mjs
 import puppeteer from "puppeteer-core";
 import { mkdirSync } from "node:fs";
 
-const BASE = process.env.BASE_URL || "https://quark.lexarcai.com";
+const BASE = process.env.BASE_URL || "https://quark.leapwiseai.com";
 const EMAIL = process.env.DEMO_EMAIL || "demo@quark.dev";
 const PASSWORD = process.env.DEMO_PASSWORD || "quark123";
 const CHROME = process.env.CHROME_PATH || "/usr/bin/google-chrome-stable";

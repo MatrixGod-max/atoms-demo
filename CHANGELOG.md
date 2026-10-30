@@ -259,7 +259,7 @@
 
 - 生成作业化:任务落库 + 进程内队列(并发 2),SSE 缓冲重放断线续传,重启中断落明确失败态
 - Validator 阶段:headless Chrome 真实运行产物,捕获运行时错误,自动回炉一轮修复
-- 安全:发布应用独立源 `quark-apps.lexarcai.com`;预览沙箱收紧;登录/生成限流 + 24h 配额;Origin 校验
+- 安全:发布应用独立源 `quark-apps.leapwiseai.com`;预览沙箱收紧;登录/生成限流 + 24h 配额;Origin 校验
 - 应用云存储:`window.quark.storage` 服务端 KV(8KB/值、64 键/应用),访客共享
 - 可运维:`/api/health`、每日备份、vitest 11 例、mock 流水线、e2e 冒烟、GitHub Actions CI
 

@@ -1,4 +1,4 @@
-# 部署运维手册(quark.lexarcai.com)
+# 部署运维手册(quark.leapwiseai.com)
 
 生产实例:AWS EC2(us-west-1,52.8.191.27,本机)。
 
@@ -6,15 +6,15 @@
 
 ```
 Internet :443
-  → edge-nginx (docker, host net, SNI 分流: quark.lexarcai.com / quark-apps.lexarcai.com → 127.0.0.1:4443)
+  → edge-nginx (docker, host net, SNI 分流: quark.leapwiseai.com / quark-apps.leapwiseai.com → 127.0.0.1:4443)
   → edge-caddy (docker, TLS 终结 + 反代, Let's Encrypt 自动续期)
   → quark.service (systemd, next start --port 8090, MemoryMax=1536M — validator 的 Chrome 开销)
   → SQLite: /home/ubuntu/projects/atoms-demo/data/quark.db (WAL)
 ```
 
 - 双域名同进程,`src/proxy.ts` 按 Host 分流:
-  - `quark.lexarcai.com` — 平台(登录/工作台);`/p/*` 301 到 apps 域
-  - `quark-apps.lexarcai.com` — 已发布应用 + 其 KV API(与平台 cookie/origin 隔离)
+  - `quark.leapwiseai.com` — 平台(登录/工作台);`/p/*` 301 到 apps 域
+  - `quark-apps.leapwiseai.com` — 已发布应用 + 其 KV API(与平台 cookie/origin 隔离)
 - DNS:Route53 zone `lexarcai.com`(Z06701912Y6GOG19VIYI4),A 记录 `quark`、`quark-apps` → 52.8.191.27
 - 边缘配置:`~/edge-proxy/nginx.conf`(SNI map)与 `~/edge-proxy/Caddyfile`(vhost)
   - **注意**:两者都是单文件 bind mount,编辑后必须 `docker restart edge-caddy edge-nginx`
@@ -35,7 +35,7 @@ cd ~/projects/atoms-demo && git pull && npm install && npm run build \
   && sudo systemctl restart quark
 
 # 健康检查
-curl -fsS https://quark.lexarcai.com/api/health
+curl -fsS https://quark.leapwiseai.com/api/health
 
 # 测试(单测 + mock 全链路冒烟)
 npm test
@@ -60,7 +60,7 @@ git checkout <commit> && npm run build && sudo systemctl restart quark
 sudo systemctl disable --now quark
 # 边缘: 从 ~/edge-proxy/{nginx.conf,Caddyfile} 移除 quark 段后
 docker restart edge-caddy edge-nginx
-# DNS: 删除 Route53 A 记录 quark.lexarcai.com
+# DNS: 删除 Route53 A 记录 quark.leapwiseai.com
 ```
 
 ## 自部署(Quark 服务本身)
@@ -102,7 +102,7 @@ S3 部署/模板资源功能需要 AWS 凭证链(compose 环境变量或挂载 ~
 ## 边缘代理与麦克风权限(2026-07-19)
 
 - 语音输入曾被 `~/edge-proxy/Caddyfile` 的全局安全头 `Permissions-Policy: microphone=()`
-  站点级禁用(不弹授权直接 NotAllowedError)。已在 quark.lexarcai.com 站点块**内联**安全头
+  站点级禁用(不弹授权直接 NotAllowedError)。已在 quark.leapwiseai.com 站点块**内联**安全头
   并放开 `microphone=(self)`(不再 import sec_common:其块含 `-Server` 删除操作导致整块
   defer,后写的覆盖会被回盖);其他域与 quark-apps 应用域保持全禁
 - 运维坑:edge-caddy 以**单文件 bind mount** 挂 Caddyfile —— 编辑必须原地写入(保 inode,
